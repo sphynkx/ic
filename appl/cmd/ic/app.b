@@ -89,6 +89,7 @@ IcAppPanel: module
 	PATH: con "/dis/ic/appanel.dis";
 
 	init: fn();
+	reloadtheme: fn(): int;
 	newpanel: fn(side: int): ref IcState->PanelState;
 };
 
@@ -108,6 +109,17 @@ IcBottomBar: module
 	newbar: fn(): ref IcState->BottomBarState;
 };
 
+IcUserState: module
+{
+	PATH: con "/dis/ic/userstate.dis";
+
+	init: fn();
+
+	loadstate: fn(state: ref IcState->AppState): int;
+	restore: fn(state: ref IcState->AppState): int;
+	save: fn(state: ref IcState->AppState): int;
+};
+
 sys: Sys;
 appfw: IcursesApp;
 screen: IcScreen;
@@ -117,6 +129,7 @@ themedata: IcThemeData;
 appanel: IcAppPanel;
 topbar: IcTopBar;
 bottombar: IcBottomBar;
+userstate: IcUserState;
 
 init()
 {
@@ -156,6 +169,10 @@ init()
 	if(bottombar == nil)
 		raise "fail:load ic/bottombar";
 
+	userstate = load IcUserState IcUserState->PATH;
+	if(userstate == nil)
+		raise "fail:load ic/userstate";
+
 	appfw->init("ic");
 	screen->init();
 	input->init();
@@ -164,6 +181,7 @@ init()
 	appanel->init();
 	topbar->init();
 	bottombar->init();
+	userstate->init();
 }
 
 newstate(): ref IcState->AppState
@@ -179,11 +197,14 @@ newstate(): ref IcState->AppState
 
 	s.cfg = cfgdata->loadstate();
 	s.theme = themedata->loadstate(s.cfg);
+	appanel->reloadtheme();
 
 	s.left = appanel->newpanel(IcState->SideLeft);
 	s.right = appanel->newpanel(IcState->SideRight);
 	s.topbar = topbar->newbar();
 	s.bottombar = bottombar->newbar();
+
+	userstate->loadstate(s);
 
 	return s;
 }
@@ -239,6 +260,7 @@ run(state: ref IcState->AppState): int
 		return -1;
 	}
 
+	userstate->restore(state);
 	screen->redraw(state);
 
 	while(state.running){
@@ -263,11 +285,13 @@ run(state: ref IcState->AppState): int
 				state.width = nw;
 				state.height = nh;
 				screen->rebuild(state);
+				userstate->restore(state);
 				screen->redraw(state);
 			}
 		}
 	}
 
+	userstate->save(state);
 	appfw->close(ctx);
 
 	return 0;

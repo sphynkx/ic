@@ -1,7 +1,6 @@
 implement IcConfigData;
 
 include "ic/config.m";
-include "env.m";
 
 IcConfigMod: module
 {
@@ -18,27 +17,49 @@ IcConfigMod: module
 	getbool: fn(c: ref IcConfig->Config, section, key: string, def: int): int;
 };
 
-sys: Sys;
-envmod: Env;
-cfgmod: IcConfigMod;
+IcUserDir: module
+{
+	PATH: con "/dis/ic/userdir.dis";
 
-DefaultThemeFile: con "/lib/ic/theme.cfg";
+	init: fn();
+
+	home: fn(): string;
+	dir: fn(): string;
+	enabled: fn(): int;
+
+	ensure: fn(): int;
+	path: fn(name: string): string;
+	ensurepath: fn(name: string): string;
+};
+
+sys: Sys;
+cfgmod: IcConfigMod;
+userdir: IcUserDir;
+
+DefaultThemeName: con "default";
+DefaultThemeFile: con "/lib/ic/default.theme";
 DefaultKeysFile: con "/lib/ic/keys.cfg";
 DefaultLayoutFile: con "/lib/ic/layout.cfg";
 DefaultMenusFile: con "/lib/ic/menus.cfg";
 
-UserBaseDir: con "/usr";
-UserConfigDir: con "ic";
+StateFileName: con "state.cfg";
+ThemeSuffix: con ".theme";
 
-ThemeFileName: con "theme.cfg";
 KeysFileName: con "keys.cfg";
 LayoutFileName: con "layout.cfg";
 MenusFileName: con "menus.cfg";
 
-DefaultUserName: con "inferno";
-
-userconfigpath: fn(name: string): string;
-username: fn(): string;
+cleanline: fn(s: string): string;
+splitkv: fn(s: string): (string, string, int);
+readfile: fn(path: string): string;
+validfile: fn(path: string): int;
+endswith: fn(s, suffix: string): int;
+themename: fn(name: string): string;
+themefilename: fn(name: string): string;
+readstatetheme: fn(): string;
+stdthemepath: fn(name: string): string;
+userthemepath: fn(name: string): string;
+selectedthemepath: fn(name: string): (string, int);
 
 init()
 {
@@ -46,64 +67,282 @@ init()
 	if(sys == nil)
 		raise "fail:load sys";
 
-	envmod = load Env Env->PATH;
-	if(envmod == nil)
-		raise "fail:load env";
-
 	cfgmod = load IcConfigMod IcConfigMod->PATH;
 	if(cfgmod == nil)
 		raise "fail:load icurses/config";
 
+	userdir = load IcUserDir IcUserDir->PATH;
+	if(userdir == nil)
+		raise "fail:load ic/userdir";
+
 	cfgmod->init();
+	userdir->init();
 }
 
-username(): string
+cleanline(s: string): string
 {
-	user: string;
+	while(len s > 0
+	&& (s[len s - 1] == '\n'
+	|| s[len s - 1] == '\r'
+	|| s[len s - 1] == ' '
+	|| s[len s - 1] == '\t'))
+		s = s[0:len s - 1];
 
-	user = envmod->getenv("user");
-	if(user == nil || user == "")
-		user = DefaultUserName;
+	while(len s > 0 && (s[0] == ' ' || s[0] == '\t'))
+		s = s[1:];
 
-	return user;
+	return s;
 }
 
-userconfigpath(name: string): string
+splitkv(s: string): (string, string, int)
 {
-	return UserBaseDir + "/" + username() + "/" + UserConfigDir + "/" + name;
+	i: int;
+	key, value: string;
+
+	s = cleanline(s);
+	if(s == "" || s[0] == '#')
+		return ("", "", 0);
+
+	for(i = 0; i < len s; i++){
+		if(s[i] != '=')
+			continue;
+
+		key = cleanline(s[0:i]);
+		value = cleanline(s[i + 1:]);
+
+		if(key == "")
+			return ("", "", 0);
+
+		return (key, value, 1);
+	}
+
+	return ("", "", 0);
+}
+
+readfile(path: string): string
+{
+	fd: ref Sys->FD;
+	buf: array of byte;
+	n: int;
+	text: string;
+
+	if(path == "")
+		return "";
+
+	fd = sys->open(path, Sys->OREAD);
+	if(fd == nil)
+		return "";
+
+	buf = array[4096] of byte;
+	text = "";
+
+	for(;;){
+		n = sys->read(fd, buf, len buf);
+		if(n <= 0)
+			break;
+
+		text += string buf[0:n];
+	}
+
+	fd = nil;
+	return text;
+}
+
+validfile(path: string): int
+{
+	rc: int;
+	d: Sys->Dir;
+
+	if(path == "")
+		return 0;
+
+	(rc, d) = sys->stat(path);
+	if(rc < 0)
+		return 0;
+
+	return (d.mode & Sys->DMDIR) == 0;
+}
+
+endswith(s, suffix: string): int
+{
+	if(len suffix > len s)
+		return 0;
+
+	return s[len s - len suffix:] == suffix;
+}
+
+themename(name: string): string
+{
+	i: int;
+
+	name = cleanline(name);
+	if(name == "")
+		return DefaultThemeName;
+
+	for(i = 0; i < len name; i++){
+		if(name[i] == '/' || name[i] == '\\')
+			return DefaultThemeName;
+	}
+
+	if(endswith(name, ThemeSuffix))
+		name = name[0:len name - len ThemeSuffix];
+
+	if(name == "")
+		return DefaultThemeName;
+
+	return name;
+}
+
+themefilename(name: string): string
+{
+	name = themename(name);
+	return name + ThemeSuffix;
+}
+
+readstatetheme(): string
+{
+	path, text, line, key, value: string;
+	i, start, ok: int;
+
+	if(!userdir->enabled())
+		return DefaultThemeName;
+
+	path = userdir->path(StateFileName);
+	if(path == "")
+		return DefaultThemeName;
+
+	text = readfile(path);
+	if(text == "")
+		return DefaultThemeName;
+
+	start = 0;
+	for(i = 0; i <= len text; i++){
+		if(i < len text && text[i] != '\n')
+			continue;
+
+		line = text[start:i];
+		start = i + 1;
+
+		(key, value, ok) = splitkv(line);
+		if(ok && key == "theme")
+			return themename(value);
+	}
+
+	return DefaultThemeName;
+}
+
+stdthemepath(name: string): string
+{
+	return "/lib/ic/" + themefilename(name);
+}
+
+userthemepath(name: string): string
+{
+	if(!userdir->enabled())
+		return "";
+
+	return userdir->path(themefilename(name));
+}
+
+selectedthemepath(name: string): (string, int)
+{
+	path: string;
+
+	name = themename(name);
+
+	path = userthemepath(name);
+	if(validfile(path))
+		return (path, IcConfigMod->OriginUser);
+
+	path = stdthemepath(name);
+	if(validfile(path))
+		return (path, IcConfigMod->OriginDefault);
+
+	return (DefaultThemeFile, IcConfigMod->OriginDefault);
 }
 
 loadstate(): ref IcState->ConfigState
 {
 	c: ref IcState->ConfigState;
+	themeorigin: int;
 
 	c = ref IcState->ConfigState;
 
-	c.themefile = DefaultThemeFile;
+	c.home = userdir->home();
+	c.userenabled = c.home != "";
+
+	if(c.userenabled){
+		userdir->ensure();
+		c.userdir = userdir->dir();
+	}else
+		c.userdir = "";
+
+	c.theme = readstatetheme();
+
 	c.keysfile = DefaultKeysFile;
 	c.layoutfile = DefaultLayoutFile;
 	c.menusfile = DefaultMenusFile;
 
-	c.userthemefile = userconfigpath(ThemeFileName);
-	c.userkeysfile = userconfigpath(KeysFileName);
-	c.userlayoutfile = userconfigpath(LayoutFileName);
-	c.usermenusfile = userconfigpath(MenusFileName);
+	(c.themefile, themeorigin) = selectedthemepath(c.theme);
+
+	c.userthemefile = "";
+	c.userkeysfile = "";
+	c.userlayoutfile = "";
+	c.usermenusfile = "";
+
+	if(c.userenabled){
+		c.userthemefile = userthemepath(c.theme);
+		c.userkeysfile = userdir->path(KeysFileName);
+		c.userlayoutfile = userdir->path(LayoutFileName);
+		c.usermenusfile = userdir->path(MenusFileName);
+	}
 
 	c.cfg = cfgmod->new();
 	if(c.cfg == nil)
 		return c;
 
-	cfgmod->overlay(c.cfg, c.themefile, IcConfigMod->OriginDefault);
+	cfgmod->overlay(c.cfg, DefaultThemeFile, IcConfigMod->OriginDefault);
+	if(c.themefile != DefaultThemeFile)
+		cfgmod->overlay(c.cfg, c.themefile, themeorigin);
+
 	cfgmod->overlay(c.cfg, c.keysfile, IcConfigMod->OriginDefault);
 	cfgmod->overlay(c.cfg, c.layoutfile, IcConfigMod->OriginDefault);
 	cfgmod->overlay(c.cfg, c.menusfile, IcConfigMod->OriginDefault);
 
-	cfgmod->overlay(c.cfg, c.userthemefile, IcConfigMod->OriginUser);
-	cfgmod->overlay(c.cfg, c.userkeysfile, IcConfigMod->OriginUser);
-	cfgmod->overlay(c.cfg, c.userlayoutfile, IcConfigMod->OriginUser);
-	cfgmod->overlay(c.cfg, c.usermenusfile, IcConfigMod->OriginUser);
+	if(c.userenabled){
+		cfgmod->overlay(c.cfg, c.userkeysfile, IcConfigMod->OriginUser);
+		cfgmod->overlay(c.cfg, c.userlayoutfile, IcConfigMod->OriginUser);
+		cfgmod->overlay(c.cfg, c.usermenusfile, IcConfigMod->OriginUser);
+	}
 
 	return c;
+}
+
+hasuserdir(c: ref IcState->ConfigState): int
+{
+	return c != nil && c.userenabled && c.userdir != "";
+}
+
+userpath(c: ref IcState->ConfigState, name: string): string
+{
+	if(!hasuserdir(c) || name == "")
+		return "";
+
+	if(c.userdir == "/")
+		return "/" + name;
+
+	return c.userdir + "/" + name;
+}
+
+ensureuserpath(c: ref IcState->ConfigState, name: string): string
+{
+	if(c == nil || !c.userenabled || name == "")
+		return "";
+
+	if(!userdir->ensure())
+		return "";
+
+	return userpath(c, name);
 }
 
 get(c: ref IcState->ConfigState, section, key, def: string): string

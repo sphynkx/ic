@@ -13,6 +13,12 @@ IcState: module
 	{
 		cfg: ref IcConfig->Config;
 
+		home: string;
+		userdir: string;
+		userenabled: int;
+
+		theme: string;
+
 		themefile: string;
 		keysfile: string;
 		layoutfile: string;
@@ -28,6 +34,16 @@ IcState: module
 	{
 		frame: int;
 		panelshadow: int;
+
+		paneltopcode: string;
+		panelbodycode: string;
+		panelfocuscode: string;
+		paneltitlecode: string;
+		panelmarkedcode: string;
+		panelmarkedfocuscode: string;
+
+		menuwindowcode: string;
+		menufocuscode: string;
 
 		modalanimticks: int;
 
@@ -274,11 +290,17 @@ IcState: module
 
 		panel: ref IcPanel->Panel;
 		model: ref IcPanel->Model;
+
+		decorationids: array of int;
 	};
 
 	TopBarState: adt
 	{
 		id: int;
+		backgroundid: int;
+		active: int;
+		focus: int;
+		itemids: array of int;
 	};
 
 	BottomBarState: adt

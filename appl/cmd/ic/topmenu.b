@@ -1,6 +1,6 @@
-implement IcTopBar;
+implement IcTopMenu;
 
-include "ic/topbar.m";
+include "ic/topmenu.m";
 
 IcUiMod: module
 {
@@ -37,11 +37,8 @@ Kreturn: con 13;
 Kleft: con 57364;
 Kright: con 57365;
 
-DefaultBaseCode: con "1;38;2;20;25;30;48;2;210;235;255";
-DefaultFocusCode: con "1;38;2;0;0;0;48;2;170;225;255";
-
-basecode: fn(state: ref IcState->AppState): string;
-focuscode: fn(state: ref IcState->AppState): string;
+BaseCode: con "1;38;2;20;25;30;48;2;210;235;255";
+FocusCode: con "1;38;2;0;0;0;48;2;170;225;255";
 
 init()
 {
@@ -57,23 +54,7 @@ init()
 	view->init();
 }
 
-basecode(state: ref IcState->AppState): string
-{
-	if(state != nil && state.theme != nil && state.theme.menuwindowcode != "")
-		return state.theme.menuwindowcode;
-
-	return DefaultBaseCode;
-}
-
-focuscode(state: ref IcState->AppState): string
-{
-	if(state != nil && state.theme != nil && state.theme.menufocuscode != "")
-		return state.theme.menufocuscode;
-
-	return DefaultFocusCode;
-}
-
-newbar(): ref IcState->TopBarState
+newstate(): ref IcState->TopBarState
 {
 	bar: ref IcState->TopBarState;
 
@@ -224,13 +205,10 @@ showmenu(state: ref IcState->AppState, bar: ref IcState->TopBarState, w: int)
 {
 	i, x, iw: int;
 	n: ref IcView->Node;
-	code, normal, focus: string;
+	code: string;
 
 	if(w <= 0)
 		return;
-
-	normal = basecode(state);
-	focus = focuscode(state);
 
 	ui->group(state.ui, state.mainid, bar.id, 0, 0, w, 1);
 
@@ -240,7 +218,7 @@ showmenu(state: ref IcState->AppState, bar: ref IcState->TopBarState, w: int)
 		view->show(n);
 	}
 
-	setlabel(state, bar.id, bar.backgroundid, 0, 0, w, spaces(w), normal);
+	setlabel(state, bar.id, bar.backgroundid, 0, 0, w, spaces(w), BaseCode);
 
 	x = 1;
 	for(i = 0; i < MenuCount; i++){
@@ -250,9 +228,9 @@ showmenu(state: ref IcState->AppState, bar: ref IcState->TopBarState, w: int)
 		if(iw <= 0)
 			break;
 
-		code = normal;
+		code = BaseCode;
 		if(bar.focus == i)
-			code = focus;
+			code = FocusCode;
 
 		setlabel(state, bar.id, bar.itemids[i], x, 0, iw, itemtext(i), code);
 		x += iw + 1;

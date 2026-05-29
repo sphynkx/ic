@@ -2,19 +2,14 @@ implement IcViewSearch;
 
 include "ic/viewsearch.m";
 
-IcUiMod: module
-{
+IcUiMod: module {
 	PATH: con "/dis/lib/icurses/ui.dis";
-
 	init: fn();
 	node: fn(u: ref IcUi->Ui, parentid, id: int, kind: string, x, y, w, h: int): int;
 	label: fn(u: ref IcUi->Ui, parentid, id: int, x, y, w: int, text: string): int;
 };
-
-IcViewMod: module
-{
+IcViewMod: module {
 	PATH: con "/dis/lib/icurses/view.dis";
-
 	init: fn();
 	allocid: fn(t: ref IcView->Tree): int;
 	find: fn(t: ref IcView->Tree, id: int): ref IcView->Node;
@@ -26,33 +21,12 @@ IcViewMod: module
 	bringtofront: fn(t: ref IcView->Tree, id: int): int;
 };
 
-SearchStyle: adt
-{
-	windowcode: string;
-	framecode: string;
-	textcode: string;
-	fieldcode: string;
-	fieldfocuscode: string;
-	focuscode: string;
-	buttoncode: string;
-	buttonfocuscode: string;
-	disabledcode: string;
-	shadowcode: string;
-
-	frameh: string;
-	framev: string;
-	framenw: string;
-	framene: string;
-	framesw: string;
-	framese: string;
-};
-
 sys: Sys;
 ui: IcUiMod;
 view: IcViewMod;
 
 s: IcViewCommon->SearchDialogState;
-style: SearchStyle;
+style: Style;
 
 StageNone: con 0;
 StageShadow: con 1;
@@ -60,6 +34,7 @@ StageWindow: con 2;
 StageClosingShadow: con 3;
 
 animstage: int;
+animwait: int;
 
 ThemeSection: con "theme";
 DefaultThemeFile: con "/lib/ic/theme.cfg";
@@ -81,6 +56,8 @@ LeftKey: con 57364;
 RightKey: con 57365;
 
 initstyle: fn();
+setstylevalue: fn(cur, next: string): string;
+animticks: fn(): int;
 loadtheme: fn();
 loadthemefile: fn(path: string);
 applythemevalue: fn(section, key, value: string);
@@ -106,6 +83,8 @@ midframe: fn(w: int): string;
 setlabel: fn(u: ref IcUi->Ui, parentid, id, x, y, w: int, text, code: string);
 checkbox: fn(checked: int, label: string): string;
 fieldtext: fn(w: int): string;
+fieldcursorpos: fn(w: int): int;
+cursoroverlay: fn(pos: int): string;
 buttontext: fn(kind: int): string;
 focusnext: fn();
 focusprev: fn();
@@ -128,52 +107,41 @@ init()
 	sys = load Sys Sys->PATH;
 	if(sys == nil)
 		raise "fail:load sys";
-
 	ui = load IcUiMod IcUiMod->PATH;
 	if(ui == nil)
 		raise "fail:load icurses/ui";
-
 	view = load IcViewMod IcViewMod->PATH;
 	if(view == nil)
 		raise "fail:load icurses/view";
-
 	ui->init();
 	view->init();
-
 	initstyle();
 	loadtheme();
-
 	s.active = 0;
 	s.alert = 0;
 	s.alerttext = "";
-
 	s.shadowid = -1;
 	s.windowid = -1;
 	s.inputid = -1;
 	s.optionids = array[5] of int;
 	s.buttonids = array[3] of int;
-
 	resetwindowids();
-
 	s.x = 0;
 	s.y = 0;
 	s.w = 0;
 	s.h = 0;
-
 	s.input = "";
 	s.inputpos = 0;
 	s.focus = IcViewCommon->SearchFocusInput;
-
 	s.case_sensitive = 1;
 	s.backward = 0;
 	s.wrap = 1;
 	s.regex = 0;
 	s.anyencoding = 0;
 	s.encoding = "utf-8";
-
 	s.result = IcViewCommon->SearchNone;
-
 	animstage = StageNone;
+	animwait = 0;
 }
 
 initstyle()
@@ -184,10 +152,13 @@ initstyle()
 	style.fieldcode = "1;38;2;255;255;255;48;2;55;160;220";
 	style.fieldfocuscode = "1;38;2;255;255;255;48;2;35;135;205";
 	style.focuscode = "1;38;2;0;0;0;48;2;170;225;255";
+	style.cursorcode = "1;38;2;255;255;255;48;2;220;80;40";
 	style.buttoncode = "1;38;2;20;20;20;48;2;235;235;235";
 	style.buttonfocuscode = "1;38;2;0;0;0;48;2;170;225;255";
 	style.disabledcode = "38;2;120;120;120;48;2;210;210;210";
-	style.shadowcode = "38;2;120;120;120;48;2;0;0;0";
+	style.shadowcode = "";
+
+	style.animticks = 0;
 
 	style.frameh = "─";
 	style.framev = "│";
@@ -195,6 +166,47 @@ initstyle()
 	style.framene = "┐";
 	style.framesw = "└";
 	style.framese = "┘";
+}
+
+setstylevalue(cur, next: string): string
+{
+	if(next != "")
+		return next;
+	return cur;
+}
+
+
+setstyle(arg: Style)
+{
+	style.windowcode = setstylevalue(style.windowcode, arg.windowcode);
+	style.framecode = setstylevalue(style.framecode, arg.framecode);
+	style.textcode = setstylevalue(style.textcode, arg.textcode);
+	style.fieldcode = setstylevalue(style.fieldcode, arg.fieldcode);
+	style.fieldfocuscode = setstylevalue(style.fieldfocuscode, arg.fieldfocuscode);
+	style.focuscode = setstylevalue(style.focuscode, arg.focuscode);
+	style.cursorcode = setstylevalue(style.cursorcode, arg.cursorcode);
+	style.buttoncode = setstylevalue(style.buttoncode, arg.buttoncode);
+	style.buttonfocuscode = setstylevalue(style.buttonfocuscode, arg.buttonfocuscode);
+	style.disabledcode = setstylevalue(style.disabledcode, arg.disabledcode);
+	style.shadowcode = setstylevalue(style.shadowcode, arg.shadowcode);
+
+	if(arg.animticks >= 0)
+		style.animticks = arg.animticks;
+
+	style.frameh = setstylevalue(style.frameh, arg.frameh);
+	style.framev = setstylevalue(style.framev, arg.framev);
+	style.framenw = setstylevalue(style.framenw, arg.framenw);
+	style.framene = setstylevalue(style.framene, arg.framene);
+	style.framesw = setstylevalue(style.framesw, arg.framesw);
+	style.framese = setstylevalue(style.framese, arg.framese);
+}
+
+animticks(): int
+{
+	if(style.animticks < 0)
+		return 0;
+
+	return style.animticks;
 }
 
 loadtheme()
@@ -339,6 +351,8 @@ applythemevalue(section, key, value: string)
 		style.fieldfocuscode = value;
 	else if(key == "viewer_search_focus_code")
 		style.focuscode = value;
+	else if(key == "viewer_search_cursor_code")
+		style.cursorcode = value;
 	else if(key == "viewer_search_button_code")
 		style.buttoncode = value;
 	else if(key == "viewer_search_button_focus_code")
@@ -347,6 +361,8 @@ applythemevalue(section, key, value: string)
 		style.disabledcode = value;
 	else if(key == "viewer_search_shadow_code")
 		style.shadowcode = value;
+	else if(key == "viewer_search_anim_ticks")
+		style.animticks = int value;
 	else if(key == "viewer_search_frame_h")
 		style.frameh = value;
 	else if(key == "viewer_search_frame_v")
@@ -378,7 +394,13 @@ open(u: ref IcUi->Ui, parentid, w, h: int, pattern: string)
 	if(s.encoding == "")
 		s.encoding = "utf-8";
 
-	animstage = StageShadow;
+	if(animticks() > 0){
+		animstage = StageShadow;
+		animwait = 0;
+	}else{
+		animstage = StageWindow;
+		animwait = 0;
+	}
 
 	resetwindowids();
 	ensureids(u);
@@ -396,7 +418,13 @@ alert(u: ref IcUi->Ui, parentid, w, h: int, text: string)
 	s.result = IcViewCommon->SearchNone;
 	s.focus = IcViewCommon->SearchFocusForward;
 
-	animstage = StageShadow;
+	if(animticks() > 0){
+		animstage = StageShadow;
+		animwait = 0;
+	}else{
+		animstage = StageWindow;
+		animwait = 0;
+	}
 
 	resetwindowids();
 	ensureids(u);
@@ -408,9 +436,10 @@ close(u: ref IcUi->Ui)
 	if(!s.active)
 		return;
 
-	if(animstage == StageWindow){
+	if(animticks() > 0 && animstage == StageWindow){
 		disposewindow(u);
 		animstage = StageClosingShadow;
+		animwait = 0;
 		return;
 	}
 
@@ -418,6 +447,7 @@ close(u: ref IcUi->Ui)
 	s.active = 0;
 	s.result = IcViewCommon->SearchNone;
 	animstage = StageNone;
+	animwait = 0;
 	resetwindowids();
 }
 
@@ -618,14 +648,71 @@ checkbox(checked: int, label: string): string
 fieldtext(w: int): string
 {
 	v: string;
+	textw, start, cursor: int;
 
 	clampinputpos();
 
-	if(s.focus != IcViewCommon->SearchFocusInput)
-		return fittext(s.input, w);
+	if(w < 1)
+		return "";
 
-	v = s.input[0:s.inputpos] + "|" + s.input[s.inputpos:];
-	return fittext(v, w);
+	textw = w;
+	if(textw < 1)
+		textw = 1;
+
+	v = s.input;
+	cursor = s.inputpos;
+	start = 0;
+
+	if(cursor >= textw)
+		start = cursor - textw + 1;
+
+	if(start < 0)
+		start = 0;
+	if(start > len v)
+		start = len v;
+
+	if(len v[start:] > textw)
+		v = v[start:start + textw];
+	else
+		v = v[start:];
+
+	while(len v < textw)
+		v += " ";
+
+	return v;
+}
+
+fieldcursorpos(w: int): int
+{
+	textw, start, cursor: int;
+
+	textw = w;
+	if(textw < 1)
+		textw = 1;
+
+	clampinputpos();
+
+	cursor = s.inputpos;
+	start = 0;
+
+	if(cursor >= textw)
+		start = cursor - textw + 1;
+
+	cursor -= start;
+
+	if(cursor < 0)
+		cursor = 0;
+	if(cursor >= textw)
+		cursor = textw - 1;
+
+	return cursor;
+}
+
+cursoroverlay(pos: int): string
+{
+	return "cursor=1\n"
+		+ "pos=" + string pos + "\n"
+		+ "base=" + style.cursorcode + "\n";
 }
 
 buttontext(kind: int): string
@@ -737,15 +824,16 @@ printable(k: int): int
 
 drawshadow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 {
-	n: ref IcView->Node;
+	if(u == nil || u.tree == nil)
+		return -1;
 
-	if(s.shadowid <= 0)
-		s.shadowid = view->allocid(u.tree);
+	if(s.shadowid >= 0)
+		view->removetree(u.tree, s.shadowid);
 
-	ui->node(u, parentid, s.shadowid, "shadow", x + 1, y + 1, w, h);
-	n = view->find(u.tree, s.shadowid);
-	if(n != nil)
-		view->setcode(n, style.shadowcode);
+	s.shadowid = view->allocid(u.tree);
+
+	if(ui->node(u, parentid, s.shadowid, "shadow", x + 2, y + 1, w, h) < 0)
+		return -1;
 
 	view->bringtofront(u.tree, s.shadowid);
 	return 0;
@@ -753,7 +841,8 @@ drawshadow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 
 drawwindow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 {
-	bodyw, bx, row, bgid: int;
+	bodyw, bx, row, bgid, cpos: int;
+	n: ref IcView->Node;
 
 	ensureids(u);
 
@@ -770,10 +859,25 @@ drawwindow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 	if(bodyw < 1)
 		bodyw = 1;
 
+	setlabel(u, s.windowid, view->allocid(u.tree), 4, 1, bodyw, "Find:", style.textcode);
+
 	if(s.focus == IcViewCommon->SearchFocusInput)
 		setlabel(u, s.windowid, s.inputid, 4, 2, bodyw, fieldtext(bodyw), style.fieldfocuscode);
 	else
 		setlabel(u, s.windowid, s.inputid, 4, 2, bodyw, fieldtext(bodyw), style.fieldcode);
+
+	n = view->find(u.tree, s.inputid);
+	if(n != nil){
+		n.styles = array[0] of string;
+
+		if(s.focus == IcViewCommon->SearchFocusInput){
+			cpos = fieldcursorpos(bodyw);
+			n.styles = array[] of {
+				"",
+				cursoroverlay(cpos)
+			};
+		}
+	}
 
 	setlabel(u, s.windowid, s.optionids[0], 4, 4, bodyw,
 		checkbox(s.case_sensitive, "Case sensitive"),
@@ -906,6 +1010,15 @@ handletick(u: ref IcUi->Ui, parentid, w, h: int): int
 {
 	if(!s.active)
 		return 0;
+
+	if(animticks() <= 0)
+		return 0;
+
+	animwait++;
+	if(animwait < animticks())
+		return 0;
+
+	animwait = 0;
 
 	if(animstage == StageShadow){
 		animstage = StageWindow;

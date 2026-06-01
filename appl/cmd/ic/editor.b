@@ -1,6 +1,7 @@
 implement IcEditor;
 
 include "ic/editor.m";
+include "ic/viewcommon.m";
 
 IcursesApp: module
 {
@@ -95,16 +96,54 @@ IcEditKeys: module
 	PATH: con "/dis/ic/editkeys.dis";
 
 	init: fn();
+	settheme: fn(theme: ref IcState->ThemeState);
 	handlekey: fn(state: ref IcState->AppState, e: ref IcState->EditorState, k, h: int): int;
+	handletick: fn(state: ref IcState->AppState, e: ref IcState->EditorState): int;
 };
 
-IcViewSearchMod: module
+IcSearchDialogMod: module
 {
-	PATH: con "/dis/ic/viewsearch.dis";
+	PATH: con "/dis/ic/searchdialog.dis";
+
+	Style: adt
+	{
+		windowcode: string;
+		framecode: string;
+		textcode: string;
+		fieldcode: string;
+		fieldfocuscode: string;
+		focuscode: string;
+		cursorcode: string;
+		buttoncode: string;
+		buttonfocuscode: string;
+		disabledcode: string;
+		shadowcode: string;
+
+		animticks: int;
+
+		frameh: string;
+		framev: string;
+		framenw: string;
+		framene: string;
+		framesw: string;
+		framese: string;
+	};
 
 	init: fn();
+	setstyle: fn(style: Style);
+
+	open: fn(u: ref IcUi->Ui, parentid, w, h: int, pattern: string);
+	alert: fn(u: ref IcUi->Ui, parentid, w, h: int, text: string);
+	close: fn(u: ref IcUi->Ui);
+
 	active: fn(): int;
+	isalert: fn(): int;
+
+	draw: fn(u: ref IcUi->Ui, parentid, w, h: int): int;
 	handletick: fn(u: ref IcUi->Ui, parentid, w, h: int): int;
+	handlekey: fn(u: ref IcUi->Ui, parentid, w, h, k: int): int;
+	options: fn(): IcViewCommon->SearchOptions;
+	pattern: fn(): string;
 };
 
 IcRuntimeTheme: module
@@ -122,12 +161,13 @@ common: IcEditCommon;
 source: IcEditSource;
 drawmod: IcEditDraw;
 keys: IcEditKeys;
-viewsearch: IcViewSearchMod;
+searchdialog: IcSearchDialogMod;
 runtheme: IcRuntimeTheme;
 
 theme: ref IcState->ThemeState;
 
 applytheme: fn(t: ref IcState->ThemeState);
+searchstyle: fn(t: ref IcState->ThemeState): IcSearchDialogMod->Style;
 
 init()
 {
@@ -159,9 +199,9 @@ init()
 	if(keys == nil)
 		raise "fail:load ic/editkeys";
 
-	viewsearch = load IcViewSearchMod IcViewSearchMod->PATH;
-	if(viewsearch == nil)
-		raise "fail:load ic/viewsearch";
+	searchdialog = load IcSearchDialogMod IcSearchDialogMod->PATH;
+	if(searchdialog == nil)
+		raise "fail:load ic/searchdialog";
 
 	runtheme = load IcRuntimeTheme IcRuntimeTheme->PATH;
 	if(runtheme == nil)
@@ -173,11 +213,12 @@ init()
 	source->init();
 	drawmod->init();
 	keys->init();
-	viewsearch->init();
+	searchdialog->init();
 	runtheme->init();
 
 	theme = runtheme->loadtheme();
 	drawmod->settheme(theme);
+	applytheme(theme);
 }
 
 applytheme(t: ref IcState->ThemeState)
@@ -186,6 +227,64 @@ applytheme(t: ref IcState->ThemeState)
 		theme = t;
 
 	drawmod->settheme(theme);
+
+	if(searchdialog != nil)
+		searchdialog->setstyle(searchstyle(theme));
+
+	if(keys != nil)
+		keys->settheme(theme);
+}
+
+searchstyle(t: ref IcState->ThemeState): IcSearchDialogMod->Style
+{
+	s: IcSearchDialogMod->Style;
+
+	s.windowcode = "";
+	s.framecode = "";
+	s.textcode = "";
+	s.fieldcode = "";
+	s.fieldfocuscode = "";
+	s.focuscode = "";
+	s.cursorcode = "";
+	s.buttoncode = "";
+	s.buttonfocuscode = "";
+	s.disabledcode = "";
+	s.shadowcode = "";
+
+	s.animticks = -1;
+
+	s.frameh = "─";
+	s.framev = "│";
+	s.framenw = "┌";
+	s.framene = "┐";
+	s.framesw = "└";
+	s.framese = "┘";
+
+	if(t == nil)
+		return s;
+
+	s.windowcode = t.dialogwindowcode;
+	s.framecode = t.dialogframecode;
+	s.textcode = t.dialogtextcode;
+	s.fieldcode = t.dialogfieldcode;
+	s.fieldfocuscode = t.dialogfieldfocuscode;
+	s.focuscode = t.dialogfocuscode;
+	s.cursorcode = t.dialogcursorcode;
+	s.buttoncode = t.dialogbuttoncode;
+	s.buttonfocuscode = t.dialogbuttonfocuscode;
+	s.disabledcode = t.dialogdisabledcode;
+	s.shadowcode = t.dialogshadowcode;
+
+	s.animticks = t.dialoganimticks;
+
+	s.frameh = t.dialogframeh;
+	s.framev = t.dialogframev;
+	s.framenw = t.dialogframenw;
+	s.framene = t.dialogframene;
+	s.framesw = t.dialogframesw;
+	s.framese = t.dialogframese;
+
+	return s;
 }
 
 runfile(path: string): int
@@ -203,7 +302,7 @@ runfile(path: string): int
 		return -1;
 
 	theme = runtheme->loadtheme();
-	drawmod->settheme(theme);
+	applytheme(theme);
 
 	e = source->newstate(path, common->dirname(path));
 	if(e == nil)
@@ -231,8 +330,10 @@ runfile(path: string): int
 	w = appfw->width(ctx);
 	h = appfw->height(ctx);
 
-	drawmod->settheme(theme);
+	applytheme(theme);
 	drawmod->draw(u, rootid, e, w, h);
+	if(searchdialog->active())
+		searchdialog->draw(u, rootid, w, h);
 	appfw->draw(ctx);
 
 	running = 1;
@@ -247,8 +348,10 @@ runfile(path: string): int
 			if(r == 2)
 				running = 0;
 			else if(r != 0){
-				drawmod->settheme(theme);
+				applytheme(theme);
 				drawmod->draw(u, rootid, e, w, h);
+				if(searchdialog->active())
+					searchdialog->draw(u, rootid, w, h);
 				appfw->draw(ctx);
 			}
 		}
@@ -259,14 +362,16 @@ runfile(path: string): int
 			if(drawmod->handletick(e))
 				r = 1;
 
-			if(viewsearch->active()){
-				if(viewsearch->handletick(u, rootid, w, h))
+			if(searchdialog->active()){
+				if(searchdialog->handletick(u, rootid, w, h))
 					r = 1;
 			}
 
 			if(r){
-				drawmod->settheme(theme);
+				applytheme(theme);
 				drawmod->draw(u, rootid, e, w, h);
+				if(searchdialog->active())
+					searchdialog->draw(u, rootid, w, h);
 				appfw->draw(ctx);
 			}
 
@@ -274,8 +379,10 @@ runfile(path: string): int
 			if(resized){
 				w = nw;
 				h = nh;
-				drawmod->settheme(theme);
+				applytheme(theme);
 				drawmod->draw(u, rootid, e, w, h);
+				if(searchdialog->active())
+					searchdialog->draw(u, rootid, w, h);
 				appfw->draw(ctx);
 			}
 		}
@@ -331,6 +438,10 @@ build(state: ref IcState->AppState, parentid, w, h: int): int
 		applytheme(state.theme);
 
 	drawmod->draw(state.ui, parentid, state.editor, w, h);
+
+	if(searchdialog->active())
+		searchdialog->draw(state.ui, parentid, w, h);
+
 	return 0;
 }
 
@@ -367,8 +478,11 @@ handletick(state: ref IcState->AppState): int
 	if(drawmod->handletick(state.editor))
 		r = 1;
 
-	if(viewsearch->active()){
-		if(viewsearch->handletick(state.ui, state.toolid, state.width, state.height))
+	if(keys != nil && keys->handletick(state, state.editor))
+		r = 1;
+
+	if(searchdialog->active()){
+		if(searchdialog->handletick(state.ui, state.toolid, state.width, state.height))
 			r = 1;
 	}
 

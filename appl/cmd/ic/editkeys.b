@@ -71,11 +71,38 @@ IcEditBlock: module
 	loadpersistent: fn(e: ref IcState->EditorState): int;
 };
 
-IcViewSearchMod: module
+IcSearchDialogMod: module
 {
-	PATH: con "/dis/ic/viewsearch.dis";
+	PATH: con "/dis/ic/searchdialog.dis";
+
+	Style: adt
+	{
+		windowcode: string;
+		framecode: string;
+		textcode: string;
+		fieldcode: string;
+		fieldfocuscode: string;
+		focuscode: string;
+		cursorcode: string;
+		buttoncode: string;
+		buttonfocuscode: string;
+		disabledcode: string;
+		shadowcode: string;
+
+		animticks: int;
+
+		frameh: string;
+		framev: string;
+		framenw: string;
+		framene: string;
+		framesw: string;
+		framese: string;
+	};
 
 	init: fn();
+	resetstyle: fn();
+	setstyle: fn(style: Style);
+	debugstate: fn(): string;
 
 	open: fn(u: ref IcUi->Ui, parentid, w, h: int, pattern: string);
 	alert: fn(u: ref IcUi->Ui, parentid, w, h: int, text: string);
@@ -90,6 +117,14 @@ IcViewSearchMod: module
 
 	options: fn(): IcViewCommon->SearchOptions;
 	pattern: fn(): string;
+};
+
+IcRuntimeTheme: module
+{
+	PATH: con "/dis/ic/runtheme.dis";
+
+	init: fn();
+	loadtheme: fn(): ref IcState->ThemeState;
 };
 
 IcEditSearchRun: module
@@ -125,7 +160,7 @@ sys: Sys;
 common: IcEditCommon;
 source: IcEditSource;
 editblock: IcEditBlock;
-viewsearch: IcViewSearchMod;
+searchdialog: IcSearchDialogMod;
 editsearchrun: IcEditSearchRun;
 viewer: IcViewerMod;
 
@@ -212,6 +247,10 @@ handlefilename: fn(e: ref IcState->EditorState, k: int): int;
 handlehelp: fn(e: ref IcState->EditorState, k: int): int;
 handlemenu: fn(e: ref IcState->EditorState, k: int): int;
 
+runtheme: IcRuntimeTheme;
+theme: ref IcState->ThemeState;
+searchstyle: fn(t: ref IcState->ThemeState): IcSearchDialogMod->Style;
+
 init()
 {
 	sys = load Sys Sys->PATH;
@@ -230,9 +269,9 @@ init()
 	if(editblock == nil)
 		raise "fail:load ic/editblock";
 
-	viewsearch = load IcViewSearchMod IcViewSearchMod->PATH;
-	if(viewsearch == nil)
-		raise "fail:load ic/viewsearch";
+	searchdialog = load IcSearchDialogMod IcSearchDialogMod->PATH;
+	if(searchdialog == nil)
+		raise "fail:load ic/searchdialog";
 
 	editsearchrun = load IcEditSearchRun IcEditSearchRun->PATH;
 	if(editsearchrun == nil)
@@ -242,12 +281,20 @@ init()
 	if(viewer == nil)
 		raise "fail:load ic/viewer";
 
+	runtheme = load IcRuntimeTheme IcRuntimeTheme->PATH;
+	if(runtheme == nil)
+		raise "fail:load ic/runtheme";
+
 	common->init();
 	source->init();
 	editblock->init();
-	viewsearch->init();
+	searchdialog->init();
 	editsearchrun->init();
 	viewer->init();
+	runtheme->init();
+
+	theme = runtheme->loadtheme();
+	settheme(theme);
 }
 
 printable(k: int): int
@@ -277,6 +324,7 @@ modalstart(e: ref IcState->EditorState, mode: int)
 	e.modalstage = 0;
 	e.modalwait = 0;
 }
+
 
 selectionrefresh(e: ref IcState->EditorState)
 {
@@ -604,13 +652,8 @@ savepersistentselection(e: ref IcState->EditorState): int
 
 flushsearchdraw(state: ref IcState->AppState): int
 {
-	if(state == nil || state.ui == nil)
-		return 0;
-
-	if(!viewsearch->active())
-		return 0;
-
-	return viewsearch->handletick(state.ui, state.toolid, state.width, state.height);
+	state = state;
+	return 0;
 }
 
 closesearch(state: ref IcState->AppState)
@@ -618,8 +661,7 @@ closesearch(state: ref IcState->AppState)
 	if(state == nil || state.ui == nil)
 		return;
 
-	viewsearch->close(state.ui);
-	flushsearchdraw(state);
+	searchdialog->close(state.ui);
 }
 
 showsearchalert(state: ref IcState->AppState, text: string)
@@ -627,8 +669,7 @@ showsearchalert(state: ref IcState->AppState, text: string)
 	if(state == nil || state.ui == nil)
 		return;
 
-	viewsearch->alert(state.ui, state.toolid, state.width, state.height, text);
-	flushsearchdraw(state);
+	searchdialog->alert(state.ui, state.toolid, state.width, state.height, text);
 }
 
 runeditsearch(state: ref IcState->AppState, e: ref IcState->EditorState, direction, fromcurrent: int): int
@@ -639,7 +680,7 @@ runeditsearch(state: ref IcState->AppState, e: ref IcState->EditorState, directi
 	if(state == nil || e == nil)
 		return 0;
 
-	opts = viewsearch->options();
+	opts = searchdialog->options();
 
 	r = editsearchrun->run(e, opts, direction, fromcurrent);
 
@@ -663,7 +704,7 @@ handlesearchdialog(state: ref IcState->AppState, e: ref IcState->EditorState, k:
 	if(state == nil || state.ui == nil || e == nil)
 		return 0;
 
-	r = viewsearch->handlekey(state.ui, state.toolid, state.width, state.height, k);
+	r = searchdialog->handlekey(state.ui, state.toolid, state.width, state.height, k);
 
 	if(r == IcViewCommon->SearchNone)
 		return 1;
@@ -790,8 +831,7 @@ handleedit(state: ref IcState->AppState, e: ref IcState->EditorState, k, h: int)
 
 		activatebutton(e, 7);
 		e.mode = IcEditCommon->ModeSearch;
-		viewsearch->open(state.ui, state.toolid, state.width, state.height, editsearchrun->lastpattern());
-		flushsearchdraw(state);
+		searchdialog->open(state.ui, state.toolid, state.width, state.height, editsearchrun->lastpattern());
 		return 1;
 
 	Kshiftf7 =>
@@ -949,12 +989,32 @@ handlemenu(e: ref IcState->EditorState, k: int): int
 	return 1;
 }
 
+handletick(state: ref IcState->AppState, e: ref IcState->EditorState): int
+{
+	r: int;
+
+	if(state == nil || state.ui == nil)
+		return 0;
+
+	if(!searchdialog->active())
+		return 0;
+
+	r = searchdialog->handletick(state.ui, state.toolid, state.width, state.height);
+	if(!r)
+		return 0;
+
+	if(!searchdialog->active() && e != nil && e.mode == IcEditCommon->ModeSearch)
+		e.mode = IcEditCommon->ModeEdit;
+
+	return 1;
+}
+
 handlekey(state: ref IcState->AppState, e: ref IcState->EditorState, k, h: int): int
 {
 	if(e == nil || !e.active)
 		return 0;
 
-	if(e.mode == IcEditCommon->ModeSearch || viewsearch->active())
+	if(e.mode == IcEditCommon->ModeSearch || searchdialog->active())
 		return handlesearchdialog(state, e, k);
 
 	if(e.mode == IcEditCommon->ModeConfirmQuit)
@@ -971,3 +1031,65 @@ handlekey(state: ref IcState->AppState, e: ref IcState->EditorState, k, h: int):
 
 	return handleedit(state, e, k, h);
 }
+
+searchstyle(t: ref IcState->ThemeState): IcSearchDialogMod->Style
+{
+	s: IcSearchDialogMod->Style;
+
+	s.windowcode = "";
+	s.framecode = "";
+	s.textcode = "";
+	s.fieldcode = "";
+	s.fieldfocuscode = "";
+	s.focuscode = "";
+	s.cursorcode = "";
+	s.buttoncode = "";
+	s.buttonfocuscode = "";
+	s.disabledcode = "";
+	s.shadowcode = "";
+
+	s.animticks = -1;
+
+	s.frameh = "─";
+	s.framev = "│";
+	s.framenw = "┌";
+	s.framene = "┐";
+	s.framesw = "└";
+	s.framese = "┘";
+
+	if(t == nil)
+		return s;
+
+	s.windowcode = t.dialogwindowcode;
+	s.framecode = t.dialogframecode;
+	s.textcode = t.dialogtextcode;
+	s.fieldcode = t.dialogfieldcode;
+	s.fieldfocuscode = t.dialogfieldfocuscode;
+	s.focuscode = t.dialogfocuscode;
+	s.cursorcode = t.dialogcursorcode;
+	s.buttoncode = t.dialogbuttoncode;
+	s.buttonfocuscode = t.dialogbuttonfocuscode;
+	s.disabledcode = t.dialogdisabledcode;
+	s.shadowcode = t.dialogshadowcode;
+
+	s.animticks = t.dialoganimticks;
+
+	s.frameh = t.dialogframeh;
+	s.framev = t.dialogframev;
+	s.framenw = t.dialogframenw;
+	s.framene = t.dialogframene;
+	s.framesw = t.dialogframesw;
+	s.framese = t.dialogframese;
+
+	return s;
+}
+
+settheme(t: ref IcState->ThemeState)
+{
+	if(t != nil)
+		theme = t;
+
+	if(searchdialog != nil)
+		searchdialog->setstyle(searchstyle(theme));
+}
+

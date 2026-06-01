@@ -54,12 +54,25 @@ IcScreenMod: module
 	rebuild: fn(state: ref IcState->AppState): int;
 };
 
-IcUserState: module
+IcConfigData: module
 {
-	PATH: con "/dis/ic/userstate.dis";
+	PATH: con "/dis/ic/config.dis";
 
 	init: fn();
-	save: fn(state: ref IcState->AppState): int;
+	loadstate: fn(): ref IcState->ConfigState;
+	settheme: fn(c: ref IcState->ConfigState, name: string): int;
+
+	hasuserdir: fn(c: ref IcState->ConfigState): int;
+	userpath: fn(c: ref IcState->ConfigState, name: string): string;
+	ensureuserpath: fn(c: ref IcState->ConfigState, name: string): string;
+
+	get: fn(c: ref IcState->ConfigState, section, key, def: string): string;
+	getint: fn(c: ref IcState->ConfigState, section, key: string, def: int): int;
+	getbool: fn(c: ref IcState->ConfigState, section, key: string, def: int): int;
+
+	set: fn(c: ref IcState->ConfigState, section, key, value: string): int;
+	setint: fn(c: ref IcState->ConfigState, section, key: string, value: int): int;
+	setbool: fn(c: ref IcState->ConfigState, section, key: string, value: int): int;
 };
 
 sys: Sys;
@@ -67,7 +80,7 @@ ui: IcUiMod;
 view: IcViewMod;
 screensaver: IcScreenSaver;
 screen: IcScreenMod;
-userstate: IcUserState;
+cfgdata: IcConfigData;
 
 DefaultBaseCode: con "38;2;20;20;20;48;2;210;210;210";
 DefaultFrameCode: con "38;2;20;20;20;48;2;210;210;210";
@@ -169,15 +182,15 @@ init()
 	if(screen == nil)
 		raise "fail:load ic/screen";
 
-	userstate = load IcUserState IcUserState->PATH;
-	if(userstate == nil)
-		raise "fail:load ic/userstate";
+	cfgdata = load IcConfigData IcConfigData->PATH;
+	if(cfgdata == nil)
+		raise "fail:load ic/config";
 
 	ui->init();
 	view->init();
 	screensaver->init();
 	screen->init();
-	userstate->init();
+	cfgdata->init();
 
 	activeflag = 0;
 	animstage = StageNone;
@@ -196,29 +209,29 @@ init()
 
 basecode(state: ref IcState->AppState): string
 {
-	if(state != nil && state.theme != nil && state.theme.modaltextcode != "")
-		return state.theme.modaltextcode;
+	if(state != nil && state.theme != nil && state.theme.dialogtextcode != "")
+		return state.theme.dialogtextcode;
 	return DefaultBaseCode;
 }
 
 framecode(state: ref IcState->AppState): string
 {
-	if(state != nil && state.theme != nil && state.theme.modalframecode != "")
-		return state.theme.modalframecode;
+	if(state != nil && state.theme != nil && state.theme.dialogframecode != "")
+		return state.theme.dialogframecode;
 	return DefaultFrameCode;
 }
 
 focuscode(state: ref IcState->AppState): string
 {
-	if(state != nil && state.theme != nil && state.theme.modalfocuscode != "")
-		return state.theme.modalfocuscode;
+	if(state != nil && state.theme != nil && state.theme.dialogfocuscode != "")
+		return state.theme.dialogfocuscode;
 	return DefaultFocusCode;
 }
 
 fieldcode(state: ref IcState->AppState): string
 {
-	if(state != nil && state.theme != nil && state.theme.modalfieldcode != "")
-		return state.theme.modalfieldcode;
+	if(state != nil && state.theme != nil && state.theme.dialogfieldcode != "")
+		return state.theme.dialogfieldcode;
 	return DefaultFieldCode;
 }
 
@@ -229,18 +242,19 @@ cursorcode(state: ref IcState->AppState): string
 
 buttoncode(state: ref IcState->AppState): string
 {
-	if(state != nil && state.theme != nil && state.theme.modalbuttoncode != "")
-		return state.theme.modalbuttoncode;
+	if(state != nil && state.theme != nil && state.theme.dialogbuttoncode != "")
+		return state.theme.dialogbuttoncode;
 	return DefaultButtonCode;
 }
 
 animticks(state: ref IcState->AppState): int
 {
-	if(state != nil && state.theme != nil && state.theme.modalanimticks >= 0)
-		return state.theme.modalanimticks;
+	if(state != nil && state.theme != nil && state.theme.dialoganimticks >= 0)
+		return state.theme.dialoganimticks;
 
 	return 0;
 }
+
 
 spaces(n: int): string
 {
@@ -514,6 +528,7 @@ idledelete()
 applychanges(state: ref IcState->AppState): int
 {
 	seconds: int;
+	name: string;
 
 	if(state == nil || state.cfg == nil)
 		return -1;
@@ -522,14 +537,20 @@ applychanges(state: ref IcState->AppState): int
 	if(seconds < 0)
 		seconds = 0;
 
-	screensaver->setenabled(state, enabledvalue);
-	screensaver->setidlelimit(state, seconds);
-
 	if(selectedindex >= 0 && selectedindex < len availablelist)
-		screensaver->setselected(state, availablelist[selectedindex]);
+		name = availablelist[selectedindex];
+	else
+		name = screensaver->selected(state.cfg);
+
+	cfgdata->setbool(state.cfg, "", "screensaver.enabled", enabledvalue);
+	cfgdata->setint(state.cfg, "", "screensaver.idle_ticks", seconds);
+	cfgdata->set(state.cfg, "", "screensaver.name", name);
+
+	state.cfg.screensaverenabled = enabledvalue;
+	state.cfg.screensaveridleticks = seconds;
+	state.cfg.screensavername = name;
 
 	screensaver->reload(state);
-	userstate->save(state);
 	screen->rebuild(state);
 
 	return 0;

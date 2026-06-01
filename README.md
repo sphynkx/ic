@@ -6,11 +6,12 @@ Inferno Commander is file manager for Inferno OS, inspired by Midnight Commander
 
 ## Features
 * Base file operations - copy, move, mkdir, delete, view, edit.
-* Personalization for UI and panels status.
+* Personalization for UI configuration and panels status.
 * Themes support for UI appearance. Fully configurable colors schema.
 * Screensavers support.
 * Internal viewer and editor, also available as separate commands `icview` and `icedit`.
 * Edit text buffers - in-memory and constant.
+* Select, copy, paste for common and block selections.
 * Codepages support for viewer.
 * Text search in editor and viewer.
 

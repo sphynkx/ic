@@ -1,6 +1,6 @@
-implement IcViewSearch;
+implement IcEditSearch;
 
-include "ic/viewsearch.m";
+include "ic/editsearch.m";
 
 IcUiMod: module
 {
@@ -21,6 +21,7 @@ IcViewMod: module
 	setcode: fn(v: ref IcView->Node, code: string);
 	show: fn(v: ref IcView->Node);
 	hide: fn(v: ref IcView->Node);
+	showtree: fn(t: ref IcView->Tree, id: int);
 	removetree: fn(t: ref IcView->Tree, id: int): int;
 	bringtofront: fn(t: ref IcView->Tree, id: int): int;
 };
@@ -49,8 +50,8 @@ view: IcViewMod;
 histmod: IcInputHistoryMod;
 
 s: IcViewCommon->SearchDialogState;
-style: Style;
 hist: ref IcInputHistoryMod->History;
+style: IcEditSearch->Style;
 
 StageNone: con 0;
 StageShadow: con 1;
@@ -60,14 +61,7 @@ StageClosingShadow: con 3;
 animstage: int;
 animwait: int;
 
-ThemeSection: con "theme";
-DefaultThemeFile: con "/lib/ic/theme.cfg";
-UserBaseDir: con "/usr";
-UserConfigDir: con "ic";
-ThemeFileName: con "theme.cfg";
-DefaultUserName: con "inferno";
-
-HistorySection: con "search_view";
+HistorySection: con "search_edit";
 HistoryMaxItems: con 32;
 
 TabKey: con 9;
@@ -82,19 +76,6 @@ DownKey: con 57363;
 LeftKey: con 57364;
 RightKey: con 57365;
 CtrlDownKey: con 57811;
-
-initstyle: fn();
-setstylevalue: fn(cur, next: string): string;
-animticks: fn(): int;
-loadtheme: fn();
-loadthemefile: fn(path: string);
-applythemevalue: fn(section, key, value: string);
-readfile: fn(path: string): string;
-username: fn(): string;
-trim: fn(v: string): string;
-parseconfig: fn(text: string);
-parseconfigline: fn(section, line: string): string;
-splitkeyvalue: fn(line: string): (string, string, int);
 
 ensureids: fn(u: ref IcUi->Ui);
 resetwindowids: fn();
@@ -138,6 +119,21 @@ drawshadow: fn(u: ref IcUi->Ui, parentid, x, y, w, h: int): int;
 drawwindow: fn(u: ref IcUi->Ui, parentid, x, y, w, h: int): int;
 drawalert: fn(u: ref IcUi->Ui, parentid, x, y, w, h: int): int;
 
+windowcode: fn(): string;
+framecode: fn(): string;
+textcode: fn(): string;
+fieldcode: fn(): string;
+fieldfocuscode: fn(): string;
+focuscode: fn(): string;
+cursorcode: fn(): string;
+buttonbasecode: fn(): string;
+buttonfocusbasecode: fn(): string;
+disabledcode: fn(): string;
+shadowcode: fn(): string;
+animticks: fn(): int;
+
+#debugstate: fn(): string;
+
 init()
 {
 	sys = load Sys Sys->PATH;
@@ -159,9 +155,6 @@ init()
 	ui->init();
 	view->init();
 	histmod->init();
-
-	initstyle();
-	loadtheme();
 
 	s.active = 0;
 	s.alert = 0;
@@ -194,242 +187,102 @@ init()
 	s.result = IcViewCommon->SearchNone;
 
 	hist = nil;
+	style.animticks = -1;
 
 	animstage = StageNone;
 	animwait = 0;
 }
 
-initstyle()
+setstyle(sv: Style)
 {
-	style.windowcode = "38;2;20;20;20;48;2;210;210;210";
-	style.framecode = "1;38;2;35;35;35;48;2;210;210;210";
-	style.textcode = "38;2;20;20;20;48;2;210;210;210";
-	style.fieldcode = "1;38;2;255;255;255;48;2;55;160;220";
-	style.fieldfocuscode = "1;38;2;255;255;255;48;2;35;135;205";
-	style.focuscode = "1;38;2;0;0;0;48;2;170;225;255";
-	style.cursorcode = "1;38;2;255;255;255;48;2;220;80;40";
-	style.buttoncode = "1;38;2;20;20;20;48;2;235;235;235";
-	style.buttonfocuscode = "1;38;2;0;0;0;48;2;170;225;255";
-	style.disabledcode = "38;2;120;120;120;48;2;210;210;210";
-	style.shadowcode = "";
-
-	style.animticks = 0;
-
-	style.frameh = "─";
-	style.framev = "│";
-	style.framenw = "┌";
-	style.framene = "┐";
-	style.framesw = "└";
-	style.framese = "┘";
+	style = sv;
 }
 
-setstylevalue(cur, next: string): string
+windowcode(): string
 {
-	if(next != "")
-		return next;
-	return cur;
+	if(style.windowcode != "")
+		return style.windowcode;
+	return "38;2;20;20;20;48;2;210;210;210";
 }
 
-
-setstyle(arg: Style)
+framecode(): string
 {
-	style.windowcode = setstylevalue(style.windowcode, arg.windowcode);
-	style.framecode = setstylevalue(style.framecode, arg.framecode);
-	style.textcode = setstylevalue(style.textcode, arg.textcode);
-	style.fieldcode = setstylevalue(style.fieldcode, arg.fieldcode);
-	style.fieldfocuscode = setstylevalue(style.fieldfocuscode, arg.fieldfocuscode);
-	style.focuscode = setstylevalue(style.focuscode, arg.focuscode);
-	style.cursorcode = setstylevalue(style.cursorcode, arg.cursorcode);
-	style.buttoncode = setstylevalue(style.buttoncode, arg.buttoncode);
-	style.buttonfocuscode = setstylevalue(style.buttonfocuscode, arg.buttonfocuscode);
-	style.disabledcode = setstylevalue(style.disabledcode, arg.disabledcode);
-	style.shadowcode = setstylevalue(style.shadowcode, arg.shadowcode);
+	if(style.framecode != "")
+		return style.framecode;
+	return "1;38;2;35;35;35;48;2;210;210;210";
+}
 
-	if(arg.animticks >= 0)
-		style.animticks = arg.animticks;
+textcode(): string
+{
+	if(style.textcode != "")
+		return style.textcode;
+	return "38;2;20;20;20;48;2;210;210;210";
+}
 
-	style.frameh = setstylevalue(style.frameh, arg.frameh);
-	style.framev = setstylevalue(style.framev, arg.framev);
-	style.framenw = setstylevalue(style.framenw, arg.framenw);
-	style.framene = setstylevalue(style.framene, arg.framene);
-	style.framesw = setstylevalue(style.framesw, arg.framesw);
-	style.framese = setstylevalue(style.framese, arg.framese);
+fieldcode(): string
+{
+	if(style.fieldcode != "")
+		return style.fieldcode;
+	return "1;38;2;255;255;255;48;2;55;160;220";
+}
+
+fieldfocuscode(): string
+{
+	if(style.fieldfocuscode != "")
+		return style.fieldfocuscode;
+	return "1;38;2;255;255;255;48;2;35;135;205";
+}
+
+focuscode(): string
+{
+	if(style.focuscode != "")
+		return style.focuscode;
+	return "1;38;2;0;0;0;48;2;170;225;255";
+}
+
+cursorcode(): string
+{
+	if(style.cursorcode != "")
+		return style.cursorcode;
+	return "1;38;2;255;255;255;48;2;220;80;40";
+}
+
+buttonbasecode(): string
+{
+	if(style.buttoncode != "")
+		return style.buttoncode;
+	return "1;38;2;20;20;20;48;2;235;235;235";
+}
+
+buttonfocusbasecode(): string
+{
+	if(style.buttonfocuscode != "")
+		return style.buttonfocuscode;
+	return "1;38;2;0;0;0;48;2;170;225;255";
+}
+
+disabledcode(): string
+{
+	if(style.disabledcode != "")
+		return style.disabledcode;
+	return "38;2;120;120;120;48;2;210;210;210";
+}
+
+shadowcode(): string
+{
+	return style.shadowcode;
 }
 
 animticks(): int
 {
-	if(style.animticks < 0)
-		return 0;
-
-	return style.animticks;
+	if(style.animticks >= 0)
+		return style.animticks;
+	return 0;
 }
 
-loadtheme()
+animticks_DUMMY(): int
 {
-	loadthemefile(DefaultThemeFile);
-	loadthemefile(UserBaseDir + "/" + username() + "/" + UserConfigDir + "/" + ThemeFileName);
-}
-
-loadthemefile(path: string)
-{
-	text: string;
-
-	text = readfile(path);
-	if(text == "")
-		return;
-
-	parseconfig(text);
-}
-
-readfile(path: string): string
-{
-	fd: ref Sys->FD;
-	buf: array of byte;
-	n: int;
-	text: string;
-
-	fd = sys->open(path, Sys->OREAD);
-	if(fd == nil)
-		return "";
-
-	buf = array[4096] of byte;
-	text = "";
-
-	for(;;){
-		n = sys->read(fd, buf, len buf);
-		if(n <= 0)
-			break;
-
-		text += string buf[0:n];
-	}
-
-	fd = nil;
-	return text;
-}
-
-username(): string
-{
-	v: string;
-
-	v = trim(readfile("/env/user"));
-	if(v == "")
-		return DefaultUserName;
-
-	return v;
-}
-
-trim(v: string): string
-{
-	a, b: int;
-
-	a = 0;
-	b = len v;
-
-	while(a < b && (v[a] == ' ' || v[a] == '\t' || v[a] == '\n' || v[a] == '\r'))
-		a++;
-
-	while(b > a && (v[b - 1] == ' ' || v[b - 1] == '\t' || v[b - 1] == '\n' || v[b - 1] == '\r'))
-		b--;
-
-	if(a >= b)
-		return "";
-
-	return v[a:b];
-}
-
-parseconfig(text: string)
-{
-	i, start: int;
-	line, section: string;
-
-	section = "";
-	start = 0;
-
-	for(i = 0; i <= len text; i++){
-		if(i < len text && text[i] != '\n')
-			continue;
-
-		line = text[start:i];
-		section = parseconfigline(section, line);
-		start = i + 1;
-	}
-}
-
-parseconfigline(section, line: string): string
-{
-	key, value: string;
-	ok: int;
-
-	line = trim(line);
-	if(line == "")
-		return section;
-
-	if(line[0] == '#')
-		return section;
-
-	if(line[0] == '[' && len line > 2 && line[len line - 1] == ']')
-		return trim(line[1:len line - 1]);
-
-	(key, value, ok) = splitkeyvalue(line);
-	if(ok)
-		applythemevalue(section, key, value);
-
-	return section;
-}
-
-splitkeyvalue(line: string): (string, string, int)
-{
-	i: int;
-
-	for(i = 0; i < len line; i++){
-		if(line[i] == '=')
-			return (trim(line[0:i]), trim(line[i + 1:]), 1);
-	}
-
-	return ("", "", 0);
-}
-
-applythemevalue(section, key, value: string)
-{
-	if(section != ThemeSection)
-		return;
-
-	if(key == "viewer_search_window_code")
-		style.windowcode = value;
-	else if(key == "viewer_search_frame_code")
-		style.framecode = value;
-	else if(key == "viewer_search_text_code")
-		style.textcode = value;
-	else if(key == "viewer_search_field_code")
-		style.fieldcode = value;
-	else if(key == "viewer_search_field_focus_code")
-		style.fieldfocuscode = value;
-	else if(key == "viewer_search_focus_code")
-		style.focuscode = value;
-	else if(key == "viewer_search_cursor_code")
-		style.cursorcode = value;
-	else if(key == "viewer_search_button_code")
-		style.buttoncode = value;
-	else if(key == "viewer_search_button_focus_code")
-		style.buttonfocuscode = value;
-	else if(key == "viewer_search_disabled_code")
-		style.disabledcode = value;
-	else if(key == "viewer_search_shadow_code")
-		style.shadowcode = value;
-	else if(key == "viewer_search_anim_ticks")
-		style.animticks = int value;
-	else if(key == "viewer_search_frame_h")
-		style.frameh = value;
-	else if(key == "viewer_search_frame_v")
-		style.framev = value;
-	else if(key == "viewer_search_frame_nw")
-		style.framenw = value;
-	else if(key == "viewer_search_frame_ne")
-		style.framene = value;
-	else if(key == "viewer_search_frame_sw")
-		style.framesw = value;
-	else if(key == "viewer_search_frame_se")
-		style.framese = value;
+	return 0;
 }
 
 open(u: ref IcUi->Ui, parentid, w, h: int, pattern: string)
@@ -452,6 +305,11 @@ open(u: ref IcUi->Ui, parentid, w, h: int, pattern: string)
 	if(s.encoding == "")
 		s.encoding = "utf-8";
 
+	loadhistory();
+
+	resetwindowids();
+	ensureids(u);
+
 	if(animticks() > 0){
 		animstage = StageShadow;
 		animwait = 0;
@@ -460,10 +318,6 @@ open(u: ref IcUi->Ui, parentid, w, h: int, pattern: string)
 		animwait = 0;
 	}
 
-	loadhistory();
-
-	resetwindowids();
-	ensureids(u);
 	draw(u, parentid, w, h);
 }
 
@@ -481,6 +335,9 @@ alert(u: ref IcUi->Ui, parentid, w, h: int, text: string)
 	s.inputhistorysel = -1;
 	s.inputhistoryitems = array[0] of string;
 
+	resetwindowids();
+	ensureids(u);
+
 	if(animticks() > 0){
 		animstage = StageShadow;
 		animwait = 0;
@@ -489,8 +346,6 @@ alert(u: ref IcUi->Ui, parentid, w, h: int, text: string)
 		animwait = 0;
 	}
 
-	resetwindowids();
-	ensureids(u);
 	draw(u, parentid, w, h);
 }
 
@@ -664,28 +519,28 @@ topframe(w: int, title: string): string
 	prefix: string;
 	n: int;
 
-	prefix = style.framenw + " " + title + " ";
-	n = w - len prefix - len style.framene;
+	prefix = "┌ " + title + " ";
+	n = w - len prefix - len "┐";
 	if(n < 0)
 		n = 0;
 
-	return fittext(prefix + fillstr(n, style.frameh) + style.framene, w);
+	return fittext(prefix + fillstr(n, "─") + "┐", w);
 }
 
 bottomframe(w: int): string
 {
 	if(w < 2)
-		return fittext(style.framesw, w);
+		return fittext("└", w);
 
-	return style.framesw + fillstr(w - 2, style.frameh) + style.framese;
+	return "└" + fillstr(w - 2, "─") + "┘";
 }
 
 midframe(w: int): string
 {
 	if(w < 2)
-		return fittext(style.framev, w);
+		return fittext("│", w);
 
-	return style.framev + spaces(w - 2) + style.framev;
+	return "│" + spaces(w - 2) + "│";
 }
 
 setlabel(u: ref IcUi->Ui, parentid, id, x, y, w: int, text, code: string)
@@ -784,7 +639,7 @@ cursoroverlay(pos: int): string
 {
 	return "cursor=1\n"
 		+ "pos=" + string pos + "\n"
-		+ "base=" + style.cursorcode + "\n";
+		+ "base=" + cursorcode() + "\n";
 }
 
 loadhistory()
@@ -812,7 +667,7 @@ savehistory()
 	if(hist == nil)
 		return;
 
-	v = trim(s.input);
+	v = s.input;
 	if(v == "")
 		return;
 
@@ -923,9 +778,9 @@ drawhistory(u: ref IcUi->Ui)
 		view->setbounds(n, x, y + i, w, 1);
 		view->settext(n, fittext(text, w));
 		if(i == s.inputhistorysel)
-			view->setcode(n, style.focuscode);
+			view->setcode(n, focuscode());
 		else
-			view->setcode(n, style.fieldcode);
+			view->setcode(n, fieldcode());
 		view->show(n);
 		view->bringtofront(u.tree, id);
 	}
@@ -946,17 +801,17 @@ buttontext(kind: int): string
 optioncode(focus: int): string
 {
 	if(s.focus == focus)
-		return style.focuscode;
+		return focuscode();
 
-	return style.textcode;
+	return textcode();
 }
 
 buttoncode(focus: int): string
 {
 	if(s.focus == focus)
-		return style.buttonfocuscode;
+		return buttonfocusbasecode();
 
-	return style.buttoncode;
+	return buttonbasecode();
 }
 
 togglefocus(): int
@@ -1000,8 +855,8 @@ insertchar(k: int)
 	c: string;
 
 	clampinputpos();
-	c = sys->sprint("%c", k);
 
+	c = sys->sprint("%c", k);
 	s.input = s.input[0:s.inputpos] + c + s.input[s.inputpos:];
 	s.inputpos++;
 }
@@ -1029,13 +884,7 @@ deletechar()
 
 printable(k: int): int
 {
-	if(k < 32)
-		return 0;
-
-	if(k >= 57344)
-		return 0;
-
-	return 1;
+	return k >= 32 && k < 127;
 }
 
 drawshadow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
@@ -1057,183 +906,191 @@ drawshadow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 
 drawwindow(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 {
-	bodyw, bx, row, bgid, cpos: int;
+	bodyw, row, bgid: int;
 	n: ref IcView->Node;
 
-	ensureids(u);
+	if(u == nil || u.tree == nil)
+		return -1;
 
+	if(s.windowid >= 0)
+		view->removetree(u.tree, s.windowid);
+
+	if(s.shadowid >= 0)
+		view->removetree(u.tree, s.shadowid);
+
+	s.shadowid = view->allocid(u.tree);
+	s.windowid = view->allocid(u.tree);
+	s.inputid = view->allocid(u.tree);
+	s.optionids = array[] of {
+		view->allocid(u.tree),
+		view->allocid(u.tree),
+		view->allocid(u.tree),
+		view->allocid(u.tree),
+		view->allocid(u.tree)
+	};
+	s.buttonids = array[] of {
+		view->allocid(u.tree),
+		view->allocid(u.tree),
+		view->allocid(u.tree)
+	};
+
+	ui->node(u, parentid, s.shadowid, "shadow", x + 2, y + 1, w, h);
 	ui->node(u, parentid, s.windowid, "group", x, y, w, h);
 
-	setlabel(u, s.windowid, view->allocid(u.tree), 0, 0, w, topframe(w, "Search"), style.framecode);
+	setlabel(u, s.windowid, view->allocid(u.tree), 0, 0, w, topframe(w, "Search"), framecode());
 	for(row = 1; row < h - 1; row++){
 		bgid = view->allocid(u.tree);
-		setlabel(u, s.windowid, bgid, 0, row, w, midframe(w), style.framecode);
+		setlabel(u, s.windowid, bgid, 0, row, w, midframe(w), windowcode());
 	}
-	setlabel(u, s.windowid, view->allocid(u.tree), 0, h - 1, w, bottomframe(w), style.framecode);
+	setlabel(u, s.windowid, view->allocid(u.tree), 0, h - 1, w, bottomframe(w), framecode());
 
-	bodyw = w - 8;
+	bodyw = w - 4;
 	if(bodyw < 1)
 		bodyw = 1;
 
-	setlabel(u, s.windowid, view->allocid(u.tree), 4, 1, bodyw, "Find:", style.textcode);
+	setlabel(u, s.windowid, view->allocid(u.tree), 2, 1, bodyw, "Find:", textcode());
 
 	if(s.focus == IcViewCommon->SearchFocusInput)
-		setlabel(u, s.windowid, s.inputid, 4, 2, bodyw, fieldtext(bodyw), style.fieldfocuscode);
+		setlabel(u, s.windowid, s.inputid, 2, 2, bodyw, fieldtext(bodyw), fieldfocuscode());
 	else
-		setlabel(u, s.windowid, s.inputid, 4, 2, bodyw, fieldtext(bodyw), style.fieldcode);
+		setlabel(u, s.windowid, s.inputid, 2, 2, bodyw, fieldtext(bodyw), fieldcode());
 
 	n = view->find(u.tree, s.inputid);
 	if(n != nil){
 		n.styles = array[0] of string;
 
 		if(s.focus == IcViewCommon->SearchFocusInput && !s.inputhistoryopen){
-			cpos = fieldcursorpos(bodyw);
 			n.styles = array[] of {
 				"",
-				cursoroverlay(cpos)
+				cursoroverlay(fieldcursorpos(bodyw))
 			};
 		}
 	}
 
-	setlabel(u, s.windowid, s.optionids[0], 4, 4, bodyw,
-		checkbox(s.case_sensitive, "Case sensitive"),
-		optioncode(IcViewCommon->SearchFocusCase));
+	setlabel(u, s.windowid, s.optionids[0], 2, 4, bodyw, checkbox(s.case_sensitive, "Case sensitive"), optioncode(IcViewCommon->SearchFocusCase));
+	setlabel(u, s.windowid, s.optionids[1], 2, 5, bodyw, checkbox(s.backward, "Backward"), optioncode(IcViewCommon->SearchFocusBackward));
+	setlabel(u, s.windowid, s.optionids[2], 2, 6, bodyw, checkbox(s.wrap, "Wrap search"), optioncode(IcViewCommon->SearchFocusWrap));
+	setlabel(u, s.windowid, s.optionids[3], 2, 7, bodyw, checkbox(s.regex, "Regex"), optioncode(IcViewCommon->SearchFocusRegex));
+	setlabel(u, s.windowid, s.optionids[4], 2, 8, bodyw, checkbox(s.anyencoding, "Any encoding"), optioncode(IcViewCommon->SearchFocusAnyEncoding));
 
-	setlabel(u, s.windowid, s.optionids[1], 4, 5, bodyw,
-		checkbox(s.backward, "Backward"),
-		optioncode(IcViewCommon->SearchFocusBackward));
+	if(s.anyencoding)
+		setlabel(u, s.windowid, view->allocid(u.tree), 2, 9, bodyw, "Encoding: auto", disabledcode());
+	else
+		setlabel(u, s.windowid, view->allocid(u.tree), 2, 9, bodyw, "Encoding: " + s.encoding, disabledcode());
 
-	setlabel(u, s.windowid, s.optionids[2], 4, 6, bodyw,
-		checkbox(s.wrap, "Wrap search"),
-		optioncode(IcViewCommon->SearchFocusWrap));
-
-	setlabel(u, s.windowid, s.optionids[3], 4, 7, bodyw,
-		checkbox(s.regex, "Regex"),
-		optioncode(IcViewCommon->SearchFocusRegex));
-
-	setlabel(u, s.windowid, s.optionids[4], 4, 8, bodyw,
-		checkbox(s.anyencoding, "Any encoding"),
-		optioncode(IcViewCommon->SearchFocusAnyEncoding));
-
-	setlabel(u, s.windowid, view->allocid(u.tree), 4, 9, bodyw,
-		"Encoding: " + s.encoding,
-		style.disabledcode);
-
-	bx = (w - 38) / 2;
-	if(bx < 2)
-		bx = 2;
-
-	setlabel(u, s.windowid, s.buttonids[0], bx, 11, 13,
-		buttontext(0),
-		buttoncode(IcViewCommon->SearchFocusForward));
-
-	setlabel(u, s.windowid, s.buttonids[1], bx + 15, 11, 12,
-		buttontext(1),
-		buttoncode(IcViewCommon->SearchFocusBackwardButton));
-
-	setlabel(u, s.windowid, s.buttonids[2], bx + 29, 11, 10,
-		buttontext(2),
-		buttoncode(IcViewCommon->SearchFocusCancel));
+	setlabel(u, s.windowid, s.buttonids[0], 6, 11, len buttontext(0), buttontext(0), buttoncode(IcViewCommon->SearchFocusForward));
+	setlabel(u, s.windowid, s.buttonids[1], 6 + len buttontext(0) + 2, 11, len buttontext(1), buttontext(1), buttoncode(IcViewCommon->SearchFocusBackward));
+	setlabel(u, s.windowid, s.buttonids[2], 6 + len buttontext(0) + 2 + len buttontext(1) + 2, 11, len buttontext(2), buttontext(2), buttoncode(IcViewCommon->SearchFocusCancel));
 
 	drawhistory(u);
 
+	view->showtree(u.tree, s.windowid);
 	view->bringtofront(u.tree, s.windowid);
+
+	animstage = StageWindow;
 	return 0;
 }
 
 drawalert(u: ref IcUi->Ui, parentid, x, y, w, h: int): int
 {
-	bodyw, bx, row, bgid: int;
+	bodyw, row, bgid: int;
 
-	ensureids(u);
+	if(u == nil || u.tree == nil)
+		return -1;
+
+	if(s.windowid >= 0)
+		view->removetree(u.tree, s.windowid);
+
+	if(s.shadowid >= 0)
+		view->removetree(u.tree, s.shadowid);
+
+	s.shadowid = view->allocid(u.tree);
+	s.windowid = view->allocid(u.tree);
+
+	ui->node(u, parentid, s.shadowid, "shadow", x + 2, y + 1, w, h);
+	n: ref IcView->Node;
+	n = view->find(u.tree, s.shadowid);
+	if(n != nil && shadowcode() != "")
+		view->setcode(n, shadowcode());
 
 	ui->node(u, parentid, s.windowid, "group", x, y, w, h);
 
-	setlabel(u, s.windowid, view->allocid(u.tree), 0, 0, w, topframe(w, "Search"), style.framecode);
+	setlabel(u, s.windowid, view->allocid(u.tree), 0, 0, w, topframe(w, "Search"), framecode());
 	for(row = 1; row < h - 1; row++){
 		bgid = view->allocid(u.tree);
-		setlabel(u, s.windowid, bgid, 0, row, w, midframe(w), style.framecode);
+		setlabel(u, s.windowid, bgid, 0, row, w, midframe(w), windowcode());
 	}
-	setlabel(u, s.windowid, view->allocid(u.tree), 0, h - 1, w, bottomframe(w), style.framecode);
+	setlabel(u, s.windowid, view->allocid(u.tree), 0, h - 1, w, bottomframe(w), framecode());
 
-	bodyw = w - 8;
+	bodyw = w - 4;
 	if(bodyw < 1)
 		bodyw = 1;
 
-	setlabel(u, s.windowid, view->allocid(u.tree), 4, 2, bodyw, s.alerttext, style.textcode);
+	setlabel(u, s.windowid, view->allocid(u.tree), 2, 2, bodyw, s.alerttext, textcode());
+	setlabel(u, s.windowid, s.buttonids[0], (w - len "[ OK ]") / 2, h - 2, len "[ OK ]", "[ OK ]", buttoncode(IcViewCommon->SearchFocusForward));
 
-	bx = (w - 6) / 2;
-	if(bx < 2)
-		bx = 2;
-
-	setlabel(u, s.windowid, s.buttonids[0], bx, 4, 6, "[ OK ]", style.buttonfocuscode);
-
+	view->showtree(u.tree, s.windowid);
 	view->bringtofront(u.tree, s.windowid);
+
+	animstage = StageWindow;
 	return 0;
 }
 
 draw(u: ref IcUi->Ui, parentid, w, h: int): int
 {
-	iw, wh, x, y: int;
+	dw, dh, x, y: int;
 
-	if(u == nil || u.tree == nil || !s.active)
+	if(u == nil || u.tree == nil)
 		return -1;
 
+	dw = 48;
+	dh = 13;
+
 	if(s.alert){
-		iw = 44;
-		wh = 7;
-	}else{
-		iw = 60;
-		wh = 14;
+		dw = len s.alerttext + 8;
+		if(dw < 24)
+			dw = 24;
+		dh = 7;
 	}
 
-	if(iw > w - 4)
-		iw = w - 4;
-	if(iw < 38)
-		iw = 38;
+	if(dw > w - 4)
+		dw = w - 4;
+	if(dh > h - 4)
+		dh = h - 4;
 
-	if(wh > h - 2)
-		wh = h - 2;
-	if(wh < 7)
-		wh = 7;
-
-	x = (w - iw) / 2;
-	y = (h - wh) / 2;
-	if(x < 0)
-		x = 0;
-	if(y < 0)
-		y = 0;
+	x = (w - dw) / 2;
+	y = (h - dh) / 2;
 
 	s.x = x;
 	s.y = y;
-	s.w = iw;
-	s.h = wh;
+	s.w = dw;
+	s.h = dh;
 
-	if(animstage == StageShadow || animstage == StageClosingShadow)
-		return drawshadow(u, parentid, x, y, iw, wh);
-
-	if(s.windowid >= 0)
-		view->removetree(u.tree, s.windowid);
-	resetwindowids();
-
-	drawshadow(u, parentid, x, y, iw, wh);
+	if(animticks() > 0 && animstage == StageShadow)
+		return drawshadow(u, parentid, x, y, dw, dh);
 
 	if(s.alert)
-		return drawalert(u, parentid, x, y, iw, wh);
+		return drawalert(u, parentid, x, y, dw, dh);
 
-	return drawwindow(u, parentid, x, y, iw, wh);
+	return drawwindow(u, parentid, x, y, dw, dh);
 }
 
-handletick(u: ref IcUi->Ui, parentid, w, h: int): int
+handletick_ISX(u: ref IcUi->Ui, parentid, w, h: int): int
 {
+	delay: int;
+
 	if(!s.active)
 		return 0;
 
-	if(animticks() <= 0)
+	if(animstage == StageNone || animstage == StageWindow)
 		return 0;
 
+	delay = animticks();
+	if(delay <= 0)
+		delay = 1;
+
 	animwait++;
-	if(animwait < animticks())
+	if(animwait < delay)
 		return 0;
 
 	animwait = 0;
@@ -1255,9 +1112,42 @@ handletick(u: ref IcUi->Ui, parentid, w, h: int): int
 	return 0;
 }
 
+handletick(u: ref IcUi->Ui, parentid, w, h: int): int
+{
+	if(!s.active)
+		return 0;
+
+	if(animstage == StageShadow){
+		animstage = StageWindow;
+		animwait = 0;
+
+		if(s.alert)
+			return drawalert(u, parentid, s.x, s.y, s.w, s.h) >= 0;
+
+		return drawwindow(u, parentid, s.x, s.y, s.w, s.h) >= 0;
+	}
+
+	if(animstage == StageClosingShadow){
+		dispose(u);
+		s.active = 0;
+		s.result = IcViewCommon->SearchNone;
+		animstage = StageNone;
+		animwait = 0;
+		return 1;
+	}
+
+	return 0;
+}
+
 focusnext()
 {
 	s.focus++;
+	if(s.alert){
+		if(s.focus > IcViewCommon->SearchFocusForward)
+			s.focus = IcViewCommon->SearchFocusForward;
+		return;
+	}
+
 	if(s.focus > IcViewCommon->SearchFocusCancel)
 		s.focus = IcViewCommon->SearchFocusInput;
 }
@@ -1265,12 +1155,20 @@ focusnext()
 focusprev()
 {
 	s.focus--;
+	if(s.alert){
+		if(s.focus < IcViewCommon->SearchFocusForward)
+			s.focus = IcViewCommon->SearchFocusForward;
+		return;
+	}
+
 	if(s.focus < IcViewCommon->SearchFocusInput)
 		s.focus = IcViewCommon->SearchFocusCancel;
 }
 
 handlekey(u: ref IcUi->Ui, parentid, w, h, k: int): int
 {
+	r: int;
+
 	if(!s.active)
 		return IcViewCommon->SearchNone;
 
@@ -1279,19 +1177,67 @@ handlekey(u: ref IcUi->Ui, parentid, w, h, k: int): int
 
 	if(s.alert){
 		if(k == EscapeKey || k == EnterKey || k == ReturnKey || k == SpaceKey){
-			s.result = IcViewCommon->SearchAlertClosed;
-			return s.result;
+			close(u);
+			return IcViewCommon->SearchAlertClosed;
 		}
-
 		return IcViewCommon->SearchNone;
 	}
 
+	if(s.inputhistoryopen){
+		if(k == EscapeKey){
+			s.inputhistoryopen = 0;
+			s.inputhistorysel = -1;
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
+
+		if(k == UpKey){
+			if(s.inputhistorysel > 0)
+				s.inputhistorysel--;
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
+
+		if(k == DownKey){
+			if(s.inputhistorysel + 1 < len s.inputhistoryitems)
+				s.inputhistorysel++;
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
+
+		if(k == EnterKey || k == ReturnKey){
+			if(s.inputhistorysel >= 0 && s.inputhistorysel < len s.inputhistoryitems){
+				s.input = s.inputhistoryitems[s.inputhistorysel];
+				s.inputpos = len s.input;
+			}
+			s.inputhistoryopen = 0;
+			s.inputhistorysel = -1;
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
+	}
+
 	if(k == EscapeKey){
-		s.inputhistoryopen = 0;
-		s.inputhistorysel = -1;
-		hidehistory(u);
-		s.result = IcViewCommon->SearchCancel;
-		return s.result;
+		close(u);
+		return IcViewCommon->SearchCancel;
+	}
+
+	if(k == TabKey){
+		focusnext();
+		draw(u, parentid, w, h);
+		return IcViewCommon->SearchNone;
+	}
+
+	if(k == LeftKey && s.focus != IcViewCommon->SearchFocusInput){
+		focusprev();
+		draw(u, parentid, w, h);
+		return IcViewCommon->SearchNone;
+	}
+
+	if(k == RightKey && s.focus != IcViewCommon->SearchFocusInput){
+		focusnext();
+		draw(u, parentid, w, h);
+		return IcViewCommon->SearchNone;
 	}
 
 	if(s.focus == IcViewCommon->SearchFocusInput){
@@ -1305,168 +1251,102 @@ handlekey(u: ref IcUi->Ui, parentid, w, h, k: int): int
 			return IcViewCommon->SearchNone;
 		}
 
-		if(k == DownKey && s.inputhistoryopen){
-			if(s.inputhistoryitems != nil && len s.inputhistoryitems > 0){
-				if(s.inputhistorysel < 0)
-					s.inputhistorysel = 0;
-				else if(s.inputhistorysel + 1 < len s.inputhistoryitems)
-					s.inputhistorysel++;
-				else
-					s.inputhistorysel = 0;
-				draw(u, parentid, w, h);
-			}
-			return IcViewCommon->SearchNone;
-		}
-
-		if(k == UpKey && s.inputhistoryopen){
-			if(s.inputhistoryitems != nil && len s.inputhistoryitems > 0){
-				if(s.inputhistorysel < 0)
-					s.inputhistorysel = len s.inputhistoryitems - 1;
-				else if(s.inputhistorysel > 0)
-					s.inputhistorysel--;
-				else
-					s.inputhistorysel = len s.inputhistoryitems - 1;
-				draw(u, parentid, w, h);
-			}
-			return IcViewCommon->SearchNone;
-		}
-	}
-
-	if(k == TabKey || (k == DownKey && !s.inputhistoryopen)){
-		s.inputhistoryopen = 0;
-		s.inputhistorysel = -1;
-		hidehistory(u);
-		focusnext();
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
-	}
-
-	if(k == UpKey && !s.inputhistoryopen){
-		focusprev();
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
-	}
-
-	if(k == LeftKey){
-		if(s.focus == IcViewCommon->SearchFocusInput){
-			s.inputhistoryopen = 0;
-			s.inputhistorysel = -1;
-			hidehistory(u);
+		if(k == LeftKey){
 			s.inputpos--;
 			clampinputpos();
-		}else
-			focusprev();
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
 
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
-	}
-
-	if(k == RightKey){
-		if(s.focus == IcViewCommon->SearchFocusInput){
-			s.inputhistoryopen = 0;
-			s.inputhistorysel = -1;
-			hidehistory(u);
+		if(k == RightKey){
 			s.inputpos++;
 			clampinputpos();
-		}else
-			focusnext();
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
 
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
-	}
-
-	if(k == BackspaceKey){
-		if(s.focus == IcViewCommon->SearchFocusInput){
-			s.inputhistoryopen = 0;
-			s.inputhistorysel = -1;
-			hidehistory(u);
+		if(k == BackspaceKey){
 			backspacechar();
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
 		}
 
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
-	}
-
-	if(k == DeleteKey){
-		if(s.focus == IcViewCommon->SearchFocusInput){
-			s.inputhistoryopen = 0;
-			s.inputhistorysel = -1;
-			hidehistory(u);
+		if(k == DeleteKey){
 			deletechar();
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
 		}
 
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
-	}
+		if(printable(k)){
+			insertchar(k);
+			draw(u, parentid, w, h);
+			return IcViewCommon->SearchNone;
+		}
 
-	if(s.focus == IcViewCommon->SearchFocusInput && printable(k)){
-		s.inputhistoryopen = 0;
-		s.inputhistorysel = -1;
-		hidehistory(u);
-		insertchar(k);
-		draw(u, parentid, w, h);
-		return IcViewCommon->SearchNone;
+		if(k == EnterKey || k == ReturnKey){
+			savehistory();
+			close(u);
+			return IcViewCommon->SearchForward;
+		}
 	}
 
 	if(k == SpaceKey){
-		if(togglefocus()){
+		r = togglefocus();
+		if(r){
 			draw(u, parentid, w, h);
 			return IcViewCommon->SearchNone;
 		}
 
 		if(s.focus == IcViewCommon->SearchFocusForward){
 			savehistory();
-			s.result = IcViewCommon->SearchForward;
-			return s.result;
+			close(u);
+			return IcViewCommon->SearchForward;
 		}
-
-		if(s.focus == IcViewCommon->SearchFocusBackwardButton){
+		if(s.focus == IcViewCommon->SearchFocusBackward){
 			savehistory();
-			s.result = IcViewCommon->SearchBackward;
-			return s.result;
+			close(u);
+			return IcViewCommon->SearchBackward;
 		}
-
 		if(s.focus == IcViewCommon->SearchFocusCancel){
-			s.result = IcViewCommon->SearchCancel;
-			return s.result;
+			close(u);
+			return IcViewCommon->SearchCancel;
 		}
 	}
 
 	if(k == EnterKey || k == ReturnKey){
-		if(s.focus == IcViewCommon->SearchFocusInput && s.inputhistoryopen){
-			if(s.inputhistoryitems != nil && len s.inputhistoryitems > 0 && s.inputhistorysel >= 0 && s.inputhistorysel < len s.inputhistoryitems){
-				s.input = s.inputhistoryitems[s.inputhistorysel];
-				s.inputpos = len s.input;
-			}
-			s.inputhistoryopen = 0;
-			s.inputhistorysel = -1;
-			hidehistory(u);
+		if(s.focus == IcViewCommon->SearchFocusCase ||
+		   s.focus == IcViewCommon->SearchFocusBackward ||
+		   s.focus == IcViewCommon->SearchFocusWrap ||
+		   s.focus == IcViewCommon->SearchFocusRegex ||
+		   s.focus == IcViewCommon->SearchFocusAnyEncoding){
+			togglefocus();
 			draw(u, parentid, w, h);
 			return IcViewCommon->SearchNone;
 		}
 
-		if(s.focus == IcViewCommon->SearchFocusInput || s.focus == IcViewCommon->SearchFocusForward){
+		if(s.focus == IcViewCommon->SearchFocusForward){
 			savehistory();
-			s.result = IcViewCommon->SearchForward;
-			return s.result;
+			close(u);
+			return IcViewCommon->SearchForward;
 		}
-
-		if(s.focus == IcViewCommon->SearchFocusBackwardButton){
+		if(s.focus == IcViewCommon->SearchFocusBackward){
 			savehistory();
-			s.result = IcViewCommon->SearchBackward;
-			return s.result;
+			close(u);
+			return IcViewCommon->SearchBackward;
 		}
-
 		if(s.focus == IcViewCommon->SearchFocusCancel){
-			s.result = IcViewCommon->SearchCancel;
-			return s.result;
-		}
-
-		if(togglefocus()){
-			draw(u, parentid, w, h);
-			return IcViewCommon->SearchNone;
+			close(u);
+			return IcViewCommon->SearchCancel;
 		}
 	}
 
 	return IcViewCommon->SearchNone;
+}
+
+
+debugstate(): string
+{
+	return "ES active=" + string s.active
+		+ " stage=" + string animstage
+		+ " wait=" + string animwait;
 }

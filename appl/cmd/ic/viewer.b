@@ -122,9 +122,9 @@ IcViewGotoMod: module
 	input: fn(): string;
 };
 
-IcViewSearchMod: module
+IcSearchDialogMod: module
 {
-	PATH: con "/dis/ic/viewsearch.dis";
+	PATH: con "/dis/ic/searchdialog.dis";
 
 	Style: adt
 	{
@@ -152,11 +152,16 @@ IcViewSearchMod: module
 
 	init: fn();
 	setstyle: fn(style: Style);
+	resetstyle: fn();
+	debugstate: fn(): string;
+
 	open: fn(u: ref IcUi->Ui, parentid, w, h: int, pattern: string);
 	alert: fn(u: ref IcUi->Ui, parentid, w, h: int, text: string);
 	close: fn(u: ref IcUi->Ui);
+
 	active: fn(): int;
 	isalert: fn(): int;
+
 	draw: fn(u: ref IcUi->Ui, parentid, w, h: int): int;
 	handletick: fn(u: ref IcUi->Ui, parentid, w, h: int): int;
 	handlekey: fn(u: ref IcUi->Ui, parentid, w, h, k: int): int;
@@ -168,7 +173,26 @@ IcViewCodepageMod: module
 {
 	PATH: con "/dis/ic/viewcodepage.dis";
 
+	Style: adt
+	{
+		windowcode: string;
+		framecode: string;
+		textcode: string;
+		focuscode: string;
+		shadowcode: string;
+
+		animticks: int;
+
+		frameh: string;
+		framev: string;
+		framenw: string;
+		framene: string;
+		framesw: string;
+		framese: string;
+	};
+
 	init: fn();
+	setstyle: fn(style: Style);
 
 	open: fn(u: ref IcUi->Ui, parentid, w, h: int, current: string);
 	close: fn(u: ref IcUi->Ui);
@@ -241,6 +265,7 @@ IcViewButtonsMod: module
 
 	init: fn();
 	settheme: fn(theme: ref IcState->ThemeState);
+	setwrap: fn(enabled: int);
 
 	draw: fn(u: ref IcUi->Ui, parentid, bottomid, w, h: int);
 	activate: fn(fkey: int);
@@ -288,12 +313,33 @@ IcRuntimeTheme: module
 	loadtheme: fn(): ref IcState->ThemeState;
 };
 
+IcConfigDataMod: module
+{
+	PATH: con "/dis/ic/config.dis";
+
+	init: fn();
+	loadstate: fn(): ref IcState->ConfigState;
+	settheme: fn(c: ref IcState->ConfigState, name: string): int;
+
+	hasuserdir: fn(c: ref IcState->ConfigState): int;
+	userpath: fn(c: ref IcState->ConfigState, name: string): string;
+	ensureuserpath: fn(c: ref IcState->ConfigState, name: string): string;
+
+	get: fn(c: ref IcState->ConfigState, section, key, def: string): string;
+	getint: fn(c: ref IcState->ConfigState, section, key: string, def: int): int;
+	getbool: fn(c: ref IcState->ConfigState, section, key: string, def: int): int;
+
+	set: fn(c: ref IcState->ConfigState, section, key, value: string): int;
+	setint: fn(c: ref IcState->ConfigState, section, key: string, value: int): int;
+	setbool: fn(c: ref IcState->ConfigState, section, key: string, value: int): int;
+};
+
 sys: Sys;
 appfw: IcursesApp;
 ui: IcUiMod;
 view: IcViewMod;
 gotomod: IcViewGotoMod;
-viewsearch: IcViewSearchMod;
+searchdialog: IcSearchDialogMod;
 viewcodepage: IcViewCodepageMod;
 codepagemod: IcCodepageMod;
 srcmod: IcViewSourceMod;
@@ -302,8 +348,10 @@ viewbuttons: IcViewButtonsMod;
 viewstatus: IcViewStatusMod;
 viewsearchrun: IcViewSearchRunMod;
 runtheme: IcRuntimeTheme;
+cfgdata: IcConfigDataMod;
 
 source: ref IcViewCommon->ViewerSource;
+standalonecfg: ref IcState->ConfigState;
 
 theme: ref IcState->ThemeState;
 viewerbodyrows: int;
@@ -314,6 +362,7 @@ DefaultErrorCode: con "1;38;2;255;120;120;48;2;20;45;90";
 
 InitialPrefetchScreens: con 6;
 ScrollPrefetchScreens: con 8;
+StateWrapKey: con "wrap";
 
 Kesc: con 27;
 Kq: con int 'q';
@@ -359,8 +408,12 @@ topcode: fn(): string;
 bodycode: fn(): string;
 errorcode: fn(): string;
 gotostyle: fn(t: ref IcState->ThemeState): IcViewGotoMod->Style;
-searchstyle: fn(t: ref IcState->ThemeState): IcViewSearchMod->Style;
+searchstyle: fn(t: ref IcState->ThemeState): IcSearchDialogMod->Style;
+codepagestyle: fn(t: ref IcState->ThemeState): IcViewCodepageMod->Style;
 applytheme: fn(t: ref IcState->ThemeState);
+
+loadwrapsetting: fn(state: ref IcState->AppState): int;
+savewrapsetting: fn(state: ref IcState->AppState, enabled: int);
 
 clampview: fn(v: ref IcState->ViewerState, h: int);
 ensureids: fn(u: ref IcUi->Ui, v: ref IcState->ViewerState);
@@ -404,9 +457,9 @@ init()
 	if(gotomod == nil)
 		raise "fail:load ic/viewgoto";
 
-	viewsearch = load IcViewSearchMod IcViewSearchMod->PATH;
-	if(viewsearch == nil)
-		raise "fail:load ic/viewsearch";
+	searchdialog = load IcSearchDialogMod IcSearchDialogMod->PATH;
+	if(searchdialog == nil)
+		raise "fail:load ic/searchdialog";
 
 	viewcodepage = load IcViewCodepageMod IcViewCodepageMod->PATH;
 	if(viewcodepage == nil)
@@ -440,11 +493,15 @@ init()
 	if(runtheme == nil)
 		raise "fail:load ic/runtheme";
 
+	cfgdata = load IcConfigDataMod IcConfigDataMod->PATH;
+	if(cfgdata == nil)
+		raise "fail:load ic/config";
+
 	appfw->init("icview");
 	ui->init();
 	view->init();
 	gotomod->init();
-	viewsearch->init();
+	searchdialog->init();
 	viewcodepage->init();
 	codepagemod->init();
 	srcmod->init();
@@ -453,8 +510,10 @@ init()
 	viewstatus->init();
 	viewsearchrun->init();
 	runtheme->init();
+	cfgdata->init();
 
 	source = nil;
+	standalonecfg = nil;
 	theme = runtheme->loadtheme();
 	applytheme(theme);
 
@@ -512,25 +571,73 @@ gotostyle(t: ref IcState->ThemeState): IcViewGotoMod->Style
 	if(t == nil)
 		return s;
 
-	s.windowcode = t.viewergotowindowcode;
-	s.framecode = t.viewergotoframecode;
-	s.textcode = t.viewergototextcode;
-	s.fieldcode = t.viewergotofieldcode;
-	s.fieldfocuscode = t.viewergotofieldfocuscode;
-	s.focuscode = t.viewergotofocuscode;
-	s.cursorcode = t.viewergotocursorcode;
-	s.buttoncode = t.viewergotobuttoncode;
-	s.buttonfocuscode = t.viewergotobuttonfocuscode;
-	s.shadowcode = t.viewergotoshadowcode;
+	s.windowcode = t.dialogwindowcode;
+	s.framecode = t.dialogframecode;
+	s.textcode = t.dialogtextcode;
+	s.fieldcode = t.dialogfieldcode;
+	s.fieldfocuscode = t.dialogfieldfocuscode;
+	s.focuscode = t.dialogfocuscode;
+	s.cursorcode = t.dialogcursorcode;
+	s.buttoncode = t.dialogbuttoncode;
+	s.buttonfocuscode = t.dialogbuttonfocuscode;
+	s.shadowcode = t.dialogshadowcode;
 
-	s.animticks = t.modalanimticks;
+	s.animticks = t.dialoganimticks;
+
+	s.frameh = t.dialogframeh;
+	s.framev = t.dialogframev;
+	s.framenw = t.dialogframenw;
+	s.framene = t.dialogframene;
+	s.framesw = t.dialogframesw;
+	s.framese = t.dialogframese;
 
 	return s;
 }
 
-searchstyle(t: ref IcState->ThemeState): IcViewSearchMod->Style
+
+codepagestyle(t: ref IcState->ThemeState): IcViewCodepageMod->Style
 {
-	s: IcViewSearchMod->Style;
+	s: IcViewCodepageMod->Style;
+
+	s.windowcode = "";
+	s.framecode = "";
+	s.textcode = "";
+	s.focuscode = "";
+	s.shadowcode = "";
+
+	s.animticks = -1;
+
+	s.frameh = "─";
+	s.framev = "│";
+	s.framenw = "┌";
+	s.framene = "┐";
+	s.framesw = "└";
+	s.framese = "┘";
+
+	if(t == nil)
+		return s;
+
+	s.windowcode = t.dialogwindowcode;
+	s.framecode = t.dialogframecode;
+	s.textcode = t.dialogtextcode;
+	s.focuscode = t.dialogfocuscode;
+	s.shadowcode = t.dialogshadowcode;
+
+	s.animticks = t.dialoganimticks;
+
+	s.frameh = t.dialogframeh;
+	s.framev = t.dialogframev;
+	s.framenw = t.dialogframenw;
+	s.framene = t.dialogframene;
+	s.framesw = t.dialogframesw;
+	s.framese = t.dialogframese;
+
+	return s;
+}
+
+searchstyle(t: ref IcState->ThemeState): IcSearchDialogMod->Style
+{
+	s: IcSearchDialogMod->Style;
 
 	s.windowcode = "";
 	s.framecode = "";
@@ -556,19 +663,26 @@ searchstyle(t: ref IcState->ThemeState): IcViewSearchMod->Style
 	if(t == nil)
 		return s;
 
-	s.windowcode = t.viewersearchwindowcode;
-	s.framecode = t.viewersearchframecode;
-	s.textcode = t.viewersearchtextcode;
-	s.fieldcode = t.viewersearchfieldcode;
-	s.fieldfocuscode = t.viewersearchfieldfocuscode;
-	s.focuscode = t.viewersearchfocuscode;
-	s.cursorcode = t.modalcursorcode;
-	s.buttoncode = t.viewersearchbuttoncode;
-	s.buttonfocuscode = t.viewersearchbuttonfocuscode;
-	s.disabledcode = t.viewersearchdisabledcode;
-	s.shadowcode = t.viewersearchshadowcode;
+	s.windowcode = t.dialogwindowcode;
+	s.framecode = t.dialogframecode;
+	s.textcode = t.dialogtextcode;
+	s.fieldcode = t.dialogfieldcode;
+	s.fieldfocuscode = t.dialogfieldfocuscode;
+	s.focuscode = t.dialogfocuscode;
+	s.cursorcode = t.dialogcursorcode;
+	s.buttoncode = t.dialogbuttoncode;
+	s.buttonfocuscode = t.dialogbuttonfocuscode;
+	s.disabledcode = t.dialogdisabledcode;
+	s.shadowcode = t.dialogshadowcode;
 
-	s.animticks = t.modalanimticks;
+	s.animticks = t.dialoganimticks;
+
+	s.frameh = t.dialogframeh;
+	s.framev = t.dialogframev;
+	s.framenw = t.dialogframenw;
+	s.framene = t.dialogframene;
+	s.framesw = t.dialogframesw;
+	s.framese = t.dialogframese;
 
 	return s;
 }
@@ -583,10 +697,42 @@ applytheme(t: ref IcState->ThemeState)
 	if(gotomod != nil)
 		gotomod->setstyle(gotostyle(theme));
 
-	if(viewsearch != nil)
-		viewsearch->setstyle(searchstyle(theme));
+	if(searchdialog != nil)
+		searchdialog->setstyle(searchstyle(theme));
+
+	if(viewcodepage != nil)
+		viewcodepage->setstyle(codepagestyle(theme));
 }
 
+loadwrapsetting(state: ref IcState->AppState): int
+{
+	if(state != nil && state.cfg != nil)
+		return cfgdata->getbool(state.cfg, "", StateWrapKey, 1);
+
+	if(standalonecfg == nil)
+		standalonecfg = cfgdata->loadstate();
+
+	if(standalonecfg == nil)
+		return 1;
+
+	return cfgdata->getbool(standalonecfg, "", StateWrapKey, 1);
+}
+
+savewrapsetting(state: ref IcState->AppState, enabled: int)
+{
+	if(state != nil && state.cfg != nil){
+		cfgdata->setbool(state.cfg, "", StateWrapKey, enabled);
+		return;
+	}
+
+	if(standalonecfg == nil)
+		standalonecfg = cfgdata->loadstate();
+
+	if(standalonecfg == nil)
+		return;
+
+	cfgdata->setbool(standalonecfg, "", StateWrapKey, enabled);
+}
 
 newstate(): ref IcState->ViewerState
 {
@@ -605,6 +751,7 @@ newstate(): ref IcState->ViewerState
 	v.bodyids = array[0] of int;
 	v.lastw = 0;
 	v.encoding = codepagemod->defaultname();
+	v.wrap = loadwrapsetting(nil);
 
 	return v;
 }
@@ -790,7 +937,12 @@ clampview(v: ref IcState->ViewerState, h: int)
 		prefetch(v, rows);
 
 		if(source.eof){
-			max = srcmod->linecount(source) - 1;
+			if(v.wrap){
+				rewrap(v, v.lastw);
+				max = len v.wrapped - rows;
+			}else
+				max = srcmod->linecount(source) - 1;
+
 			if(max < 0)
 				max = 0;
 			if(v.topline > max)
@@ -800,7 +952,11 @@ clampview(v: ref IcState->ViewerState, h: int)
 				v.topline = 0;
 		}
 
-		v.nlines = srcmod->linecount(source);
+		if(v.wrap){
+			rewrap(v, v.lastw);
+			v.nlines = len v.wrapped;
+		}else
+			v.nlines = srcmod->linecount(source);
 	}else{
 		max = v.nlines - 1;
 		if(max < 0)
@@ -887,6 +1043,7 @@ drawviewer(u: ref IcUi->Ui, parentid: int, v: ref IcState->ViewerState, w, h: in
 {
 	rows, id: int;
 	code, content: string;
+	display: array of string;
 
 	if(u == nil || v == nil)
 		return;
@@ -900,7 +1057,16 @@ drawviewer(u: ref IcUi->Ui, parentid: int, v: ref IcState->ViewerState, w, h: in
 	clampview(v, h);
 	refreshwindow(v, rows);
 
-	v.wrapped = v.lines;
+	if(v.wrap){
+		rewrap(v, w);
+		display = v.wrapped;
+		v.nlines = len display;
+	}else{
+		display = v.lines;
+		if(source != nil)
+			v.nlines = srcmod->linecount(source);
+	}
+
 	v.lastw = w;
 
 	ui->setstatusrows(u, -1, -1);
@@ -915,18 +1081,19 @@ drawviewer(u: ref IcUi->Ui, parentid: int, v: ref IcState->ViewerState, w, h: in
 
 	id = bodyid(v);
 	if(id >= 0){
-		content = srcmod->visiblecontent(v.lines, 0, rows);
+		content = srcmod->visiblecontent(display, v.topline, rows);
 		setbody(u, parentid, id, 0, 1, w, rows, v, content, code);
 	}
 
 	viewbuttons->settheme(theme);
+	viewbuttons->setwrap(v.wrap);
 	viewbuttons->draw(u, parentid, v.bottomid, w, h);
 
 	if(gotomod != nil && gotomod->active())
 		gotomod->draw(u, parentid, w, h);
 
-	if(viewsearch != nil && viewsearch->active())
-		viewsearch->draw(u, parentid, w, h);
+	if(searchdialog != nil && searchdialog->active())
+		searchdialog->draw(u, parentid, w, h);
 
 	if(viewcodepage != nil && viewcodepage->active())
 		viewcodepage->draw(u, parentid, w, h);
@@ -958,9 +1125,11 @@ start(state: ref IcState->AppState, path: string, mode: int): int
 	state.viewer.wrapped = array[0] of string;
 	state.viewer.topline = 0;
 	state.viewer.lastw = 0;
+	state.viewer.wrap = loadwrapsetting(state);
 	if(state.viewer.encoding == "")
 		state.viewer.encoding = codepagemod->defaultname();
 
+	viewbuttons->setwrap(state.viewer.wrap);
 	viewsearchrun->reset();
 
 	if(source != nil)
@@ -1099,7 +1268,12 @@ applygoto(v: ref IcState->ViewerState): int
 	}
 
 	if(source.eof){
-		maxline = srcmod->linecount(source) - viewerbodyrows;
+		if(v.wrap){
+			rewrap(v, v.lastw);
+			maxline = len v.wrapped - viewerbodyrows;
+		}else
+			maxline = srcmod->linecount(source) - viewerbodyrows;
+
 		if(maxline < 0)
 			maxline = 0;
 		if(v.topline > maxline)
@@ -1118,7 +1292,7 @@ showsearchalert(state: ref IcState->AppState, text: string)
 	if(state == nil || state.ui == nil)
 		return;
 
-	viewsearch->alert(state.ui, state.toolid, state.width, state.height, text);
+	searchdialog->alert(state.ui, state.toolid, state.width, state.height, text);
 	build(state, state.toolid, state.width, state.height);
 }
 
@@ -1132,7 +1306,7 @@ runsearch(state: ref IcState->AppState, direction: int, fromcurrent: int): int
 		return 0;
 
 	v = state.viewer;
-	opts = viewsearch->options();
+	opts = searchdialog->options();
 	opts.encoding = v.encoding;
 
 	r = viewsearchrun->run(source, v, opts, direction, fromcurrent);
@@ -1196,8 +1370,8 @@ closeviewer(state: ref IcState->AppState, fkey: int): int
 		statsmod->stop();
 	if(gotomod != nil)
 		gotomod->close(state.ui);
-	if(viewsearch != nil)
-		viewsearch->close(state.ui);
+	if(searchdialog != nil)
+		searchdialog->close(state.ui);
 	if(viewcodepage != nil)
 		viewcodepage->close(state.ui);
 
@@ -1261,23 +1435,23 @@ handlekey(state: ref IcState->AppState, k: int): int
 		return 1;
 	}
 
-	if(viewsearch != nil && viewsearch->active()){
-		gr = viewsearch->handlekey(state.ui, state.toolid, state.width, state.height, k);
+	if(searchdialog != nil && searchdialog->active()){
+		gr = searchdialog->handlekey(state.ui, state.toolid, state.width, state.height, k);
 
 		if(gr == IcViewCommon->SearchCancel || gr == IcViewCommon->SearchAlertClosed){
-			viewsearch->close(state.ui);
+			searchdialog->close(state.ui);
 			build(state, state.toolid, state.width, state.height);
 			return 1;
 		}
 
 		if(gr == IcViewCommon->SearchForward){
-			viewsearch->close(state.ui);
+			searchdialog->close(state.ui);
 			runsearch(state, IcViewCommon->SearchDirForward, 0);
 			return 1;
 		}
 
 		if(gr == IcViewCommon->SearchBackward){
-			viewsearch->close(state.ui);
+			searchdialog->close(state.ui);
 			runsearch(state, IcViewCommon->SearchDirBackward, 0);
 			return 1;
 		}
@@ -1292,6 +1466,16 @@ handlekey(state: ref IcState->AppState, k: int): int
 	Kq or Kesc =>
 		return closeviewer(state, 10);
 
+	Kf2 =>
+		viewbuttons->activate(2);
+		v.wrap = !v.wrap;
+		v.topline = 0;
+		v.lastw = 0;
+		viewbuttons->setwrap(v.wrap);
+		savewrapsetting(state, v.wrap);
+		build(state, state.toolid, state.width, state.height);
+		return 1;
+
 	Kf3 =>
 		return closeviewer(state, 3);
 
@@ -1302,15 +1486,15 @@ handlekey(state: ref IcState->AppState, k: int): int
 
 	Kf7 or Ks =>
 		viewbuttons->activate(7);
-		if(viewsearch != nil)
-			viewsearch->open(state.ui, state.toolid, state.width, state.height, viewsearchrun->lastpattern());
+		if(searchdialog != nil)
+			searchdialog->open(state.ui, state.toolid, state.width, state.height, viewsearchrun->lastpattern());
 
 	Kshiftf7 or Kn =>
 		viewbuttons->activate(7);
 		lastpattern = viewsearchrun->lastpattern();
 		if(lastpattern == ""){
-			if(viewsearch != nil)
-				viewsearch->open(state.ui, state.toolid, state.width, state.height, lastpattern);
+			if(searchdialog != nil)
+				searchdialog->open(state.ui, state.toolid, state.width, state.height, lastpattern);
 		}else
 			runsearch(state, IcViewCommon->SearchDirForward, 1);
 
@@ -1318,8 +1502,8 @@ handlekey(state: ref IcState->AppState, k: int): int
 		viewbuttons->activate(7);
 		lastpattern = viewsearchrun->lastpattern();
 		if(lastpattern == ""){
-			if(viewsearch != nil)
-				viewsearch->open(state.ui, state.toolid, state.width, state.height, lastpattern);
+			if(searchdialog != nil)
+				searchdialog->open(state.ui, state.toolid, state.width, state.height, lastpattern);
 		}else
 			runsearch(state, IcViewCommon->SearchDirBackward, 1);
 
@@ -1331,7 +1515,7 @@ handlekey(state: ref IcState->AppState, k: int): int
 	Kf10 =>
 		return closeviewer(state, 10);
 
-	Kf1 or Kf2 or Kf4 or Kf6 or Kf9 =>
+	Kf1 or Kf4 or Kf6 or Kf9 =>
 		r = 0;
 
 	Kup =>
@@ -1354,7 +1538,10 @@ handlekey(state: ref IcState->AppState, k: int): int
 		v.topline = 0;
 
 	Kend =>
-		if(source != nil){
+		if(v.wrap){
+			rewrap(v, state.width);
+			v.topline = len v.wrapped - rows;
+		}else if(source != nil){
 			srcmod->ensureeof(source);
 			v.nlines = srcmod->linecount(source);
 			v.topline = v.nlines - rows;
@@ -1393,7 +1580,7 @@ handletick(state: ref IcState->AppState): int
 	if(gotomod != nil && gotomod->handletick(state.ui, state.toolid, state.width, state.height))
 		changed = 1;
 
-	if(viewsearch != nil && viewsearch->handletick(state.ui, state.toolid, state.width, state.height))
+	if(searchdialog != nil && searchdialog->handletick(state.ui, state.toolid, state.width, state.height))
 		changed = 1;
 
 	if(viewcodepage != nil && viewcodepage->handletick(state.ui, state.toolid, state.width, state.height))
@@ -1427,6 +1614,8 @@ runfilemode(path: string, mode: int): int
 	closefile(source);
 	source = newsource(path);
 
+	standalonecfg = cfgdata->loadstate();
+
 	theme = runtheme->loadtheme();
 	applytheme(theme);
 
@@ -1437,7 +1626,9 @@ runfilemode(path: string, mode: int): int
 	v.wrapped = array[0] of string;
 	v.topline = 0;
 	v.lastw = 0;
+	v.wrap = loadwrapsetting(nil);
 
+	viewbuttons->setwrap(v.wrap);
 	viewsearchrun->reset();
 
 	if(source != nil)
@@ -1472,6 +1663,7 @@ runfilemode(path: string, mode: int): int
 	st.height = appfw->height(ctx);
 	st.viewer = v;
 	st.theme = theme;
+	st.cfg = standalonecfg;
 
 	v.active = 1;
 
@@ -1527,8 +1719,8 @@ runfilemode(path: string, mode: int): int
 	if(gotomod != nil)
 		gotomod->close(u);
 
-	if(viewsearch != nil)
-		viewsearch->close(u);
+	if(searchdialog != nil)
+		searchdialog->close(u);
 
 	if(viewcodepage != nil)
 		viewcodepage->close(u);

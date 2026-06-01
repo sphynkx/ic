@@ -15,6 +15,7 @@ TARG=\
 	editdraw.dis\
 	editkeys.dis\
 	editor.dis\
+	editsearch.dis\
 	editsearchrun.dis\
 	editsource.dis\
 	fsmodel.dis\
@@ -32,6 +33,7 @@ TARG=\
 	scr_flashlighter.dis\
 	scr_matrix.dis\
 	search.dis\
+	searchdialog.dis\
 	screen.dis\
 	screensaver.dis\
 	sssetup.dis\
@@ -44,7 +46,6 @@ TARG=\
 	viewcodepage.dis\
 	viewer.dis\
 	viewgoto.dis\
-	viewsearch.dis\
 	viewsearchrun.dis\
 	viewsource.dis\
 	viewstats.dis\
@@ -67,6 +68,7 @@ SYSMODULES=\
 	ic/editdraw.m\
 	ic/editkeys.m\
 	ic/editor.m\
+	ic/editsearch.m\
 	ic/editsearchrun.m\
 	ic/editsource.m\
 	ic/fsmodel.m\
@@ -81,6 +83,7 @@ SYSMODULES=\
 	ic/screen.m\
 	ic/screensaver.m\
 	ic/search.m\
+	ic/searchdialog.m\
 	ic/sssetup.m\
 	ic/state.m\
 	ic/theme.m\
@@ -93,7 +96,6 @@ SYSMODULES=\
 	ic/viewcommon.m\
 	ic/viewer.m\
 	ic/viewgoto.m\
-	ic/viewsearch.m\
 	ic/viewsearchrun.m\
 	ic/viewsource.m\
 	ic/viewstats.m\

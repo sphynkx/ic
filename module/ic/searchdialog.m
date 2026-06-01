@@ -1,9 +1,9 @@
 include "icurses/ui.m";
 include "ic/viewcommon.m";
 
-IcViewSearch: module
+IcSearchDialog: module
 {
-	PATH: con "/dis/ic/viewsearch.dis";
+	PATH: con "/dis/ic/searchdialog.dis";
 
 	Style: adt
 	{
@@ -28,7 +28,9 @@ IcViewSearch: module
 	};
 
 	init: fn();
+	resetstyle: fn();
 	setstyle: fn(style: Style);
+	debugstate: fn(): string;
 
 	open: fn(u: ref IcUi->Ui, parentid, w, h: int, pattern: string);
 	alert: fn(u: ref IcUi->Ui, parentid, w, h: int, text: string);

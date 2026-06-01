@@ -15,6 +15,11 @@ IcConfigMod: module
 	get: fn(c: ref IcConfig->Config, section, key: string): string;
 	getint: fn(c: ref IcConfig->Config, section, key: string, def: int): int;
 	getbool: fn(c: ref IcConfig->Config, section, key: string, def: int): int;
+
+	set: fn(c: ref IcConfig->Config, file, section, key, value: string): int;
+	setint: fn(c: ref IcConfig->Config, file, section, key: string, value: int): int;
+	setbool: fn(c: ref IcConfig->Config, file, section, key: string, value: int): int;
+	flush: fn(c: ref IcConfig->Config, path: string): int;
 };
 
 IcUserDir: module
@@ -50,20 +55,17 @@ LayoutFileName: con "layout.cfg";
 MenusFileName: con "menus.cfg";
 
 cleanline: fn(s: string): string;
-splitkv: fn(s: string): (string, string, int);
-readfile: fn(path: string): string;
-writefile: fn(path, text: string): int;
 validfile: fn(path: string): int;
 endswith: fn(s, suffix: string): int;
 themename: fn(name: string): string;
 themefilename: fn(name: string): string;
-readstatetheme: fn(): string;
-writestatetheme: fn(name: string): int;
 stdthemepath: fn(name: string): string;
 userthemepath: fn(name: string): string;
 selectedthemepath: fn(name: string): (string, int);
 themeexists: fn(name: string): int;
 rebuildcfg: fn(c: ref IcState->ConfigState): int;
+statefilepath: fn(c: ref IcState->ConfigState): string;
+flushstatevalue: fn(c: ref IcState->ConfigState, section, key: string): int;
 
 init()
 {
@@ -96,80 +98,6 @@ cleanline(s: string): string
 		s = s[1:];
 
 	return s;
-}
-
-splitkv(s: string): (string, string, int)
-{
-	i: int;
-	key, value: string;
-
-	s = cleanline(s);
-	if(s == "" || s[0] == '#')
-		return ("", "", 0);
-
-	for(i = 0; i < len s; i++){
-		if(s[i] != '=')
-			continue;
-
-		key = cleanline(s[0:i]);
-		value = cleanline(s[i + 1:]);
-
-		if(key == "")
-			return ("", "", 0);
-
-		return (key, value, 1);
-	}
-
-	return ("", "", 0);
-}
-
-readfile(path: string): string
-{
-	fd: ref Sys->FD;
-	buf: array of byte;
-	n: int;
-	text: string;
-
-	if(path == "")
-		return "";
-
-	fd = sys->open(path, Sys->OREAD);
-	if(fd == nil)
-		return "";
-
-	buf = array[4096] of byte;
-	text = "";
-
-	for(;;){
-		n = sys->read(fd, buf, len buf);
-		if(n <= 0)
-			break;
-
-		text += string buf[0:n];
-	}
-
-	fd = nil;
-	return text;
-}
-
-writefile(path, text: string): int
-{
-	fd: ref Sys->FD;
-
-	if(path == "")
-		return -1;
-
-	fd = sys->create(path, Sys->OWRITE, 8r666);
-	if(fd == nil)
-		return -1;
-
-	if(sys->fprint(fd, "%s", text) < 0){
-		fd = nil;
-		return -1;
-	}
-
-	fd = nil;
-	return 0;
 }
 
 validfile(path: string): int
@@ -223,83 +151,6 @@ themefilename(name: string): string
 	return name + ThemeSuffix;
 }
 
-readstatetheme(): string
-{
-	path, text, line, key, value: string;
-	i, start, ok: int;
-
-	if(!userdir->enabled())
-		return DefaultThemeName;
-
-	path = userdir->path(StateFileName);
-	if(path == "")
-		return DefaultThemeName;
-
-	text = readfile(path);
-	if(text == "")
-		return DefaultThemeName;
-
-	start = 0;
-	for(i = 0; i <= len text; i++){
-		if(i < len text && text[i] != '\n')
-			continue;
-
-		line = text[start:i];
-		start = i + 1;
-
-		(key, value, ok) = splitkv(line);
-		if(ok && key == "theme")
-			return themename(value);
-	}
-
-	return DefaultThemeName;
-}
-
-writestatetheme(name: string): int
-{
-	path, text, out, line, key, value: string;
-	i, start, ok, found: int;
-
-	name = themename(name);
-
-	if(!userdir->enabled())
-		return 0;
-
-	path = userdir->ensurepath(StateFileName);
-	if(path == "")
-		return -1;
-
-	text = readfile(path);
-	out = "";
-	found = 0;
-
-	start = 0;
-	for(i = 0; i <= len text; i++){
-		if(i < len text && text[i] != '\n')
-			continue;
-
-		line = text[start:i];
-		start = i + 1;
-
-		if(i == len text && line == "")
-			continue;
-
-		(key, value, ok) = splitkv(line);
-		value = value;
-
-		if(ok && key == "theme"){
-			out += "theme=" + name + "\n";
-			found = 1;
-		}else
-			out += line + "\n";
-	}
-
-	if(!found)
-		out = "theme=" + name + "\n" + out;
-
-	return writefile(path, out);
-}
-
 stdthemepath(name: string): string
 {
 	return "/lib/ic/" + themefilename(name);
@@ -343,6 +194,14 @@ themeexists(name: string): int
 	return name == DefaultThemeName && validfile(DefaultThemeFile);
 }
 
+statefilepath(c: ref IcState->ConfigState): string
+{
+	if(c == nil || !c.userenabled)
+		return "";
+
+	return userdir->ensurepath(StateFileName);
+}
+
 rebuildcfg(c: ref IcState->ConfigState): int
 {
 	themeorigin: int;
@@ -355,6 +214,7 @@ rebuildcfg(c: ref IcState->ConfigState): int
 	c.keysfile = DefaultKeysFile;
 	c.layoutfile = DefaultLayoutFile;
 	c.menusfile = DefaultMenusFile;
+	c.statefile = "";
 
 	c.userthemefile = "";
 	c.userkeysfile = "";
@@ -362,6 +222,7 @@ rebuildcfg(c: ref IcState->ConfigState): int
 	c.usermenusfile = "";
 
 	if(c.userenabled){
+		c.statefile = userdir->path(StateFileName);
 		c.userthemefile = userthemepath(c.theme);
 		c.userkeysfile = userdir->path(KeysFileName);
 		c.userlayoutfile = userdir->path(LayoutFileName);
@@ -381,10 +242,15 @@ rebuildcfg(c: ref IcState->ConfigState): int
 	cfgmod->overlay(c.cfg, c.menusfile, IcConfigMod->OriginDefault);
 
 	if(c.userenabled){
+		cfgmod->overlay(c.cfg, c.statefile, IcConfigMod->OriginUser);
 		cfgmod->overlay(c.cfg, c.userkeysfile, IcConfigMod->OriginUser);
 		cfgmod->overlay(c.cfg, c.userlayoutfile, IcConfigMod->OriginUser);
 		cfgmod->overlay(c.cfg, c.usermenusfile, IcConfigMod->OriginUser);
 	}
+
+	c.screensavername = get(c, "", "screensaver.name", "");
+	c.screensaverenabled = getbool(c, "", "screensaver.enabled", -1);
+	c.screensaveridleticks = getint(c, "", "screensaver.idle_ticks", -1);
 
 	return 0;
 }
@@ -404,19 +270,48 @@ loadstate(): ref IcState->ConfigState
 	}else
 		c.userdir = "";
 
-	c.theme = readstatetheme();
-
+	c.theme = DefaultThemeName;
 	c.screensavername = "";
 	c.screensaverenabled = -1;
 	c.screensaveridleticks = -1;
+
+	if(c.userenabled){
+		c.statefile = userdir->path(StateFileName);
+		if(c.statefile != ""){
+			c.cfg = cfgmod->new();
+			if(c.cfg != nil){
+				cfgmod->overlay(c.cfg, c.statefile, IcConfigMod->OriginUser);
+				c.theme = themename(cfgmod->get(c.cfg, "", "theme"));
+				if(c.theme == "")
+					c.theme = DefaultThemeName;
+			}
+		}
+	}
 
 	rebuildcfg(c);
 
 	return c;
 }
 
+flushstatevalue(c: ref IcState->ConfigState, section, key: string): int
+{
+	path: string;
+
+	if(c == nil || c.cfg == nil || key == "")
+		return -1;
+
+	path = statefilepath(c);
+	if(path == "")
+		return -1;
+
+	c.statefile = path;
+	return cfgmod->flush(c.cfg, path);
+}
+
 settheme(c: ref IcState->ConfigState, name: string): int
 {
+	path: string;
+
 	if(c == nil)
 		return -1;
 
@@ -424,10 +319,29 @@ settheme(c: ref IcState->ConfigState, name: string): int
 	if(!themeexists(name))
 		return -1;
 
-	if(writestatetheme(name) < 0)
+	if(!c.userenabled)
+		return -1;
+
+	if(c.cfg == nil){
+		c.cfg = cfgmod->new();
+		if(c.cfg == nil)
+			return -1;
+	}
+
+	path = statefilepath(c);
+	if(path == "")
+		return -1;
+
+	c.statefile = path;
+
+	if(cfgmod->set(c.cfg, path, "", "theme", name) < 0)
 		return -1;
 
 	c.theme = name;
+
+	if(cfgmod->flush(c.cfg, path) < 0)
+		return -1;
+
 	return rebuildcfg(c);
 }
 
@@ -486,4 +400,82 @@ getbool(c: ref IcState->ConfigState, section, key: string, def: int): int
 		return def;
 
 	return cfgmod->getbool(c.cfg, section, key, def);
+}
+
+set(c: ref IcState->ConfigState, section, key, value: string): int
+{
+	path: string;
+
+	if(c == nil || c.cfg == nil || key == "")
+		return -1;
+
+	if(!c.userenabled)
+		return -1;
+
+	path = statefilepath(c);
+	if(path == "")
+		return -1;
+
+	c.statefile = path;
+
+	if(cfgmod->set(c.cfg, path, section, key, value) < 0)
+		return -1;
+
+	if(section == "" && key == "theme")
+		c.theme = themename(value);
+
+	if(section == "" && key == "screensaver.name")
+		c.screensavername = value;
+
+	return cfgmod->flush(c.cfg, path);
+}
+
+setint(c: ref IcState->ConfigState, section, key: string, value: int): int
+{
+	path: string;
+
+	if(c == nil || c.cfg == nil || key == "")
+		return -1;
+
+	if(!c.userenabled)
+		return -1;
+
+	path = statefilepath(c);
+	if(path == "")
+		return -1;
+
+	c.statefile = path;
+
+	if(cfgmod->setint(c.cfg, path, section, key, value) < 0)
+		return -1;
+
+	if(section == "" && key == "screensaver.idle_ticks")
+		c.screensaveridleticks = value;
+
+	return cfgmod->flush(c.cfg, path);
+}
+
+setbool(c: ref IcState->ConfigState, section, key: string, value: int): int
+{
+	path: string;
+
+	if(c == nil || c.cfg == nil || key == "")
+		return -1;
+
+	if(!c.userenabled)
+		return -1;
+
+	path = statefilepath(c);
+	if(path == "")
+		return -1;
+
+	c.statefile = path;
+
+	if(cfgmod->setbool(c.cfg, path, section, key, value) < 0)
+		return -1;
+
+	if(section == "" && key == "screensaver.enabled")
+		c.screensaverenabled = value;
+
+	return cfgmod->flush(c.cfg, path);
 }

@@ -14,6 +14,7 @@ Inferno Commander is file manager for Inferno OS, inspired by Midnight Commander
 * Select, copy, paste for common and block selections.
 * Codepages support for viewer.
 * Text search in editor and viewer.
+* VFS with support for zip, tar, tar.gz, tar.bz2 archives.
 
 
 ## Install
